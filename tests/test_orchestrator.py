@@ -344,16 +344,67 @@ class TestArcGISPack:
         assert manifest["name"] == "arcgis"
         assert "arcpy" in manifest["capabilities"]
 
+    def test_manifest_lists_all_skills(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        assert "skills/arcgis" in manifest["skills"]
+        assert "skills/arcgis-project" in manifest["skills"]
+        assert "skills/arcgis-ingest" in manifest["skills"]
+
+    def test_manifest_capabilities(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        for cap in ["network-analyst", "spatial-statistics", "geocoding", "raster", "project-management"]:
+            assert cap in manifest["capabilities"]
+
     def test_context_has_content(self):
         context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
         assert "arcpy" in context
         assert "SearchCursor" in context
         assert "SpatialReference" in context
 
+    def test_context_has_network_analyst(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "arcpy.na" in context
+        assert "MakeServiceAreaAnalysisLayer" in context
+        assert "MakeRouteAnalysisLayer" in context
+
+    def test_context_has_spatial_statistics(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "HotSpots" in context
+        assert "ClustersOutliers" in context
+        assert "OrdinaryLeastSquares" in context
+
+    def test_context_has_automation_vs_manual(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Automation vs Manual" in context
+        assert "Fully scriptable" in context
+        assert "Requires ArcGIS Pro UI" in context
+
     def test_skill_md_exists(self):
         skill = (self.ARCGIS_DIR / "skills" / "arcgis" / "SKILL.md").read_text()
         assert "name: arcgis" in skill
         assert "user-invocable: true" in skill
+
+    def test_arcgis_project_skill_exists(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-project" / "SKILL.md").read_text()
+        assert "name: arcgis-project" in skill
+        assert "user-invocable: true" in skill
+
+    def test_arcgis_ingest_skill_exists(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-ingest" / "SKILL.md").read_text()
+        assert "name: arcgis-ingest" in skill
+        assert "user-invocable: true" in skill
+
+    def test_project_template_exists(self):
+        template_dir = self.ARCGIS_DIR / "projects" / ".template"
+        assert template_dir.is_dir()
+        for name in ["BRIEF.md", "DATASETS.md", "PARAMETERS.md", "MATERIALS.md", "NOTES.md"]:
+            assert (template_dir / name).exists(), f"Missing template: {name}"
+
+    def test_project_template_has_content(self):
+        template_dir = self.ARCGIS_DIR / "projects" / ".template"
+        for name in ["BRIEF.md", "DATASETS.md", "PARAMETERS.md", "MATERIALS.md", "NOTES.md"]:
+            content = (template_dir / name).read_text()
+            assert len(content) > 50, f"Template {name} seems too short"
 
 
 if __name__ == "__main__":
