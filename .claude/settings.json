@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill",
+      "Read",
+      "Glob",
+      "Grep"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Orchestrator Toolkit ready. Skills: /generate-plan, /execute-plan, /new-skill, /list-plugins'"
+          }
+        ]
+      }
+    ]
+  }
+}
