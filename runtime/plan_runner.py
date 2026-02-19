@@ -1,11 +1,30 @@
 from __future__ import annotations
 import os, sys, json, shutil, subprocess, re, logging
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional, TYPE_CHECKING
 
 from utils.helper import slugify, safe_join, ensure_executable, write_run_script
 
+if TYPE_CHECKING:
+    from plugins import PluginManager
+
 logger = logging.getLogger(__name__)
+
+# Module-level reference set by orchestrator before calling apply_plan
+_plugin_manager: Optional["PluginManager"] = None
+
+
+def set_plugin_manager(pm: Optional["PluginManager"]) -> None:
+    """Allow the orchestrator to inject the PluginManager for hook calls."""
+    global _plugin_manager
+    _plugin_manager = pm
+
+
+def _fire(event: str, **kwargs: Any) -> Any:
+    """Fire a plugin hook if a manager is available."""
+    if _plugin_manager is not None:
+        return _plugin_manager.hook(event, **kwargs)
+    return None
 
 def _run(cmd: str, cwd: Path, env: Optional[Dict[str, str]] = None) -> int:
     return subprocess.call(cmd, cwd=str(cwd), shell=True, env=env)
@@ -206,6 +225,11 @@ def _write_files(project_dir: Path, files: List[Dict[str, str]]) -> List[Path]:
     return written
 
 def _detect_stack(files: List[Dict[str, str]]) -> str:
+    # Let plugins contribute to stack detection first
+    hint = _fire("detect_stack", files=files)
+    if hint and isinstance(hint, str):
+        return hint
+
     names = {f["filename"].lower() for f in files}
     if "pyproject.toml" in names or "requirements.txt" in names or any(n.endswith(".py") for n in names):
         return "python"
@@ -478,6 +502,9 @@ def apply_plan(plan: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
     venv_dir: Optional[Path] = None
     python_hint: Optional[str] = None
 
+    # Fire pre_build hook — plugins can inspect/modify before build starts
+    _fire("pre_build", stack=stack, project_dir=project_dir, plan=plan)
+
     if stack == "python":
         venv_dir, python_hint = _install_python(project_dir, plan)
         logger.info(f"Python venv: {venv_dir}, hint: {python_hint}")
@@ -504,6 +531,10 @@ def apply_plan(plan: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
         "venv": str(venv_dir) if venv_dir else "",
         "run_cmd": run_cmd,
     }
+
+    # Fire post_build hook
+    _fire("post_build", stack=stack, project_dir=project_dir, result=result)
+
     logger.info(f"Plan application complete: {result}")
     return result
 

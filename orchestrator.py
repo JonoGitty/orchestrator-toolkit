@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 from cloud_agent.cloud_client import get_plan
 from config import get_config
 from plugins import PluginManager
-from runtime.plan_runner import apply_plan
+from runtime.plan_runner import apply_plan, set_plugin_manager
 from utils.runner import run_cmd
 
 logging.basicConfig(
@@ -61,8 +61,12 @@ def execute_plan(
 
     if plugins:
         plan = plugins.hook("pre_execute", plan=plan) or plan
+        set_plugin_manager(plugins)
 
     result = apply_plan(plan, output_dir)
+
+    # Clear the module-level reference
+    set_plugin_manager(None)
     logger.info("Plan applied -> %s (stack=%s)", result.get("project_dir"), result.get("stack"))
 
     if plugins:
@@ -71,19 +75,27 @@ def execute_plan(
     return result
 
 
-def run_project(project_dir: Path) -> int:
+def run_project(project_dir: Path, plugins: Optional[PluginManager] = None) -> int:
     """Run a project via its run.sh launcher (if present)."""
     runner = project_dir / "run.sh"
     if not runner.exists():
         logger.warning("No run.sh in %s", project_dir)
         return 1
     logger.info("Running project: %s", project_dir)
+
+    if plugins:
+        plugins.hook("pre_run", project_dir=project_dir)
+
     res = run_cmd(["bash", str(runner)], cwd=str(project_dir), mode="read")
     rc = res.get("rc", 1)
     if res.get("stdout"):
         print(res["stdout"])
     if res.get("stderr"):
         print(res["stderr"], file=sys.stderr)
+
+    if plugins:
+        plugins.hook("post_run", project_dir=project_dir, rc=rc)
+
     return rc
 
 
@@ -115,6 +127,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # plugins: list loaded plugins
     sub.add_parser("plugins", help="List loaded plugins")
 
+    # new-skill: scaffold a new plugin
+    ns = sub.add_parser("new-skill", help="Scaffold a new OpenClaw skill plugin")
+    ns.add_argument("name", help="Skill name (e.g. 'my-awesome-skill')")
+    ns.add_argument("--description", "-d", default="", help="Short description")
+    ns.add_argument("--author", "-a", default="", help="Author name")
+
     return p
 
 
@@ -142,16 +160,50 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     elif args.command == "run":
-        return run_project(args.project_dir)
+        return run_project(args.project_dir, plugins=plugins)
 
     elif args.command == "plugins":
-        loaded = plugins.list_plugins()
+        loaded = plugins.list_plugins_detailed()
         if not loaded:
             print("No plugins loaded.")
         else:
             print("Loaded plugins:")
-            for name, desc in loaded:
-                print(f"  - {name}: {desc}")
+            for p in loaded:
+                line = f"  - {p['name']}"
+                if p.get("version") and p["version"] != "0.0.0":
+                    line += f" v{p['version']}"
+                if p.get("description"):
+                    line += f": {p['description']}"
+                print(line)
+                if p.get("dependencies"):
+                    print(f"    deps: {', '.join(p['dependencies'])}")
+                if p.get("capabilities"):
+                    print(f"    caps: {', '.join(p['capabilities'])}")
+        # Show registered hooks
+        hook_names = plugins.get_hook_names()
+        custom = [h for h in hook_names if h not in (
+            "pre_execute", "post_execute", "pre_run", "post_run",
+            "detect_stack", "pre_build", "post_build",
+        )]
+        if custom:
+            print(f"\nCustom hook events: {', '.join(custom)}")
+        return 0
+
+    elif args.command == "new-skill":
+        from scaffolds import generate_skill
+        generated = generate_skill(
+            args.name,
+            description=args.description,
+            author=args.author,
+            output_dir=BASE_DIR,
+        )
+        print(f"Skill '{args.name}' scaffolded! Files created:")
+        for kind, path in generated.items():
+            print(f"  {kind:10s} -> {path}")
+        print(f"\nNext steps:")
+        print(f"  1. Edit plugins/ module to add your logic")
+        print(f"  2. Run tests: python -m pytest {generated.get('test', 'tests/')} -v")
+        print(f"  3. List plugins: python orchestrator.py plugins")
         return 0
 
     else:

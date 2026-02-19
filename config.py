@@ -25,7 +25,9 @@ DEFAULT_CONFIG = {
     },
     "plugins": {
         "enabled": [],
+        "disabled": [],
         "plugin_dir": "plugins",
+        "discover_entry_points": True,
     },
     "security": {
         "prefer_keyring": True,
@@ -52,7 +54,9 @@ class PathsConfig:
 @dataclass
 class PluginsConfig:
     enabled: List[str] = field(default_factory=list)
+    disabled: List[str] = field(default_factory=list)
     plugin_dir: str = "plugins"
+    discover_entry_points: bool = True
 
 
 @dataclass

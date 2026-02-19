@@ -16,7 +16,7 @@ sys.modules.setdefault("openai", MagicMock())
 
 from cloud_agent.cloud_client import _parse_any_plan, _normalize_plan
 from config import Config, ConfigManager, get_config_manager
-from plugins import PluginManager
+from plugins import PluginManager, BUILTIN_HOOKS
 
 
 class TestPlanParsing:
@@ -77,6 +77,11 @@ class TestConfiguration:
         assert config.paths.output_dir == "output"
         assert config.plugins.enabled == []
 
+    def test_config_new_plugin_fields(self):
+        config = Config.from_dict({})
+        assert config.plugins.disabled == []
+        assert config.plugins.discover_entry_points is True
+
     def test_config_file_loading(self, tmp_path):
         cfg = tmp_path / "config.json"
         cfg.write_text(
@@ -117,10 +122,27 @@ class TestPluginManager:
         result = pm.hook("pre_execute", plan={"name": "test"})
         assert result["modified"] is True
 
-    def test_invalid_hook_name_raises(self):
+    def test_custom_hook_auto_registered(self):
+        """Adding a hook for an unknown event should auto-register it."""
         pm = PluginManager()
-        with pytest.raises(ValueError):
-            pm.add_hook("invalid_event", lambda: None)
+        pm.add_hook("my_custom_event", lambda **kw: "hello")
+        result = pm.hook("my_custom_event")
+        assert result == "hello"
+        assert "my_custom_event" in pm.get_hook_names()
+
+    def test_register_hook_type_explicit(self):
+        pm = PluginManager()
+        pm.register_hook_type("skill_to_skill")
+        assert "skill_to_skill" in pm.get_hook_names()
+
+    def test_hook_priority_ordering(self):
+        pm = PluginManager()
+        order = []
+        pm.add_hook("pre_execute", lambda plan, **kw: order.append("B"), priority=200)
+        pm.add_hook("pre_execute", lambda plan, **kw: order.append("A"), priority=50)
+        pm.add_hook("pre_execute", lambda plan, **kw: order.append("C"), priority=100)
+        pm.hook("pre_execute", plan={})
+        assert order == ["A", "C", "B"]
 
     def test_register_and_list(self):
         pm = PluginManager()
@@ -129,12 +151,154 @@ class TestPluginManager:
         assert len(plugins) == 1
         assert plugins[0] == ("test-plugin", "A test plugin")
 
+    def test_register_plugin_rich_metadata(self):
+        pm = PluginManager()
+        pm.register_plugin(
+            "rich-plugin",
+            "A rich plugin",
+            version="1.2.3",
+            author="Test Author",
+            dependencies=["dep-a"],
+            capabilities=["logging"],
+        )
+        detail = pm.list_plugins_detailed()
+        assert len(detail) == 1
+        p = detail[0]
+        assert p["name"] == "rich-plugin"
+        assert p["version"] == "1.2.3"
+        assert p["author"] == "Test Author"
+        assert p["dependencies"] == ["dep-a"]
+        assert p["capabilities"] == ["logging"]
+
+    def test_duplicate_register_skipped(self):
+        pm = PluginManager()
+        pm.register_plugin("dup", "first")
+        pm.register_plugin("dup", "second")
+        assert len(pm.list_plugins()) == 1
+        assert pm.list_plugins()[0][1] == "first"
+
+    def test_get_plugin(self):
+        pm = PluginManager()
+        pm.register_plugin("findme", "I can be found")
+        assert pm.get_plugin("findme")["description"] == "I can be found"
+        assert pm.get_plugin("nope") is None
+
+    def test_check_dependencies_all_met(self):
+        pm = PluginManager()
+        pm.register_plugin("base", "base plugin")
+        pm.register_plugin("child", "child", dependencies=["base"])
+        assert pm.check_dependencies() == []
+
+    def test_check_dependencies_missing(self):
+        pm = PluginManager()
+        pm.register_plugin("lonely", "needs friend", dependencies=["missing-dep"])
+        problems = pm.check_dependencies()
+        assert len(problems) == 1
+        assert "missing-dep" in problems[0]
+
     def test_hook_error_does_not_crash(self):
         pm = PluginManager()
         pm.add_hook("pre_execute", lambda plan, **kw: 1 / 0)  # raises
         pm.add_hook("pre_execute", lambda plan, **kw: plan)
         result = pm.hook("pre_execute", plan={"name": "test"})
         assert result["name"] == "test"
+
+    def test_builtin_hooks_present(self):
+        pm = PluginManager()
+        for hook in BUILTIN_HOOKS:
+            assert hook in pm.get_hook_names()
+
+    def test_detect_stack_hook(self):
+        pm = PluginManager()
+        pm.add_hook("detect_stack", lambda files, **kw: "custom-stack")
+        result = pm.hook("detect_stack", files=[])
+        assert result == "custom-stack"
+
+    def test_build_hooks(self):
+        pm = PluginManager()
+        calls = []
+        pm.add_hook("pre_build", lambda **kw: calls.append(("pre", kw.get("stack"))))
+        pm.add_hook("post_build", lambda **kw: calls.append(("post", kw.get("stack"))))
+        pm.hook("pre_build", stack="python", project_dir="/tmp", plan={})
+        pm.hook("post_build", stack="python", project_dir="/tmp", result={})
+        assert calls == [("pre", "python"), ("post", "python")]
+
+
+class TestSkillManifest:
+    """Test skill.json manifest loading."""
+
+    def test_discover_skill_manifest(self, tmp_path):
+        # Create a skill with a manifest
+        skill_dir = tmp_path / "plugins" / "my_skill"
+        skill_dir.mkdir(parents=True)
+        manifest = {
+            "name": "my-skill",
+            "version": "1.0.0",
+            "description": "A test skill",
+            "author": "Test",
+            "dependencies": [],
+            "capabilities": ["testing"],
+        }
+        (skill_dir / "skill.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        pm = PluginManager()
+        pm._discover_skill_manifests(tmp_path / "plugins")
+
+        found = pm.get_plugin("my-skill")
+        assert found is not None
+        assert found["version"] == "1.0.0"
+        assert found["capabilities"] == ["testing"]
+
+
+class TestScaffolding:
+    """Test the skill scaffolding system."""
+
+    def test_generate_skill_creates_files(self, tmp_path):
+        from scaffolds import generate_skill
+
+        generated = generate_skill(
+            "my-test-skill",
+            description="A test skill",
+            author="Tester",
+            output_dir=tmp_path,
+        )
+
+        # All expected files exist
+        assert (tmp_path / "plugins" / "my_test_skill.py").exists()
+        assert (tmp_path / "plugins" / "my_test_skill" / "skill.json").exists()
+        assert (tmp_path / "plugins" / "my_test_skill" / "setup.py").exists()
+        assert (tmp_path / "tests" / "test_my_test_skill.py").exists()
+
+        # Manifest is valid JSON with correct values
+        manifest = json.loads(
+            (tmp_path / "plugins" / "my_test_skill" / "skill.json").read_text()
+        )
+        assert manifest["name"] == "my-test-skill"
+        assert manifest["version"] == "0.1.0"
+        assert manifest["author"] == "Tester"
+
+        # Plugin module has correct constants
+        plugin_src = (tmp_path / "plugins" / "my_test_skill.py").read_text()
+        assert 'PLUGIN_NAME = "my-test-skill"' in plugin_src
+        assert 'PLUGIN_DESCRIPTION = "A test skill"' in plugin_src
+        assert "def register(manager)" in plugin_src
+
+    def test_generate_skill_returns_paths(self, tmp_path):
+        from scaffolds import generate_skill
+
+        generated = generate_skill("cool-skill", output_dir=tmp_path)
+        assert "plugin" in generated
+        assert "manifest" in generated
+        assert "setup" in generated
+        assert "test" in generated
+
+    def test_slugify_names(self):
+        from scaffolds import _slugify
+
+        assert _slugify("my-awesome-skill") == "my_awesome_skill"
+        assert _slugify("CamelCase Plugin") == "camelcase_plugin"
+        assert _slugify("---weird---") == "weird"
+        assert _slugify("") == "my_skill"
 
 
 if __name__ == "__main__":
