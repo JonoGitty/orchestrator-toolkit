@@ -92,11 +92,9 @@ class TestConfiguration:
         config = manager._load_config()
         assert config.llm.model == "claude-sonnet-4-5-20250929"
         assert config.paths.output_dir == "out"
-        # Defaults preserved for unspecified values
         assert config.llm.temperature == 1.0
 
     def test_config_has_no_legacy_fields(self):
-        """Ensure legacy app-builder config is gone."""
         config = Config.from_dict({})
         assert not hasattr(config, "behavior")
         assert not hasattr(config, "shortcuts")
@@ -123,7 +121,6 @@ class TestPluginManager:
         assert result["modified"] is True
 
     def test_custom_hook_auto_registered(self):
-        """Adding a hook for an unknown event should auto-register it."""
         pm = PluginManager()
         pm.add_hook("my_custom_event", lambda **kw: "hello")
         result = pm.hook("my_custom_event")
@@ -198,7 +195,7 @@ class TestPluginManager:
 
     def test_hook_error_does_not_crash(self):
         pm = PluginManager()
-        pm.add_hook("pre_execute", lambda plan, **kw: 1 / 0)  # raises
+        pm.add_hook("pre_execute", lambda plan, **kw: 1 / 0)
         pm.add_hook("pre_execute", lambda plan, **kw: plan)
         result = pm.hook("pre_execute", plan={"name": "test"})
         assert result["name"] == "test"
@@ -228,7 +225,6 @@ class TestSkillManifest:
     """Test skill.json manifest loading."""
 
     def test_discover_skill_manifest(self, tmp_path):
-        # Create a skill with a manifest
         skill_dir = tmp_path / "plugins" / "my_skill"
         skill_dir.mkdir(parents=True)
         manifest = {
@@ -250,10 +246,10 @@ class TestSkillManifest:
         assert found["capabilities"] == ["testing"]
 
 
-class TestScaffolding:
-    """Test the skill scaffolding system."""
+class TestSkillPacks:
+    """Test skill pack scaffolding, installation, and listing."""
 
-    def test_generate_skill_creates_files(self, tmp_path):
+    def test_generate_skill_pack_creates_files(self, tmp_path):
         from scaffolds import generate_skill
 
         generated = generate_skill(
@@ -263,34 +259,71 @@ class TestScaffolding:
             output_dir=tmp_path,
         )
 
-        # All expected files exist
-        assert (tmp_path / "plugins" / "my_test_skill.py").exists()
-        assert (tmp_path / "plugins" / "my_test_skill" / "skill.json").exists()
-        assert (tmp_path / "plugins" / "my_test_skill" / "setup.py").exists()
+        pack_dir = tmp_path / "packs" / "my_test_skill"
+        assert pack_dir.is_dir()
+        assert (pack_dir / "skill.json").exists()
+        assert (pack_dir / "CONTEXT.md").exists()
+        assert (pack_dir / "hooks.py").exists()
+        assert (pack_dir / "skills" / "my_test_skill" / "SKILL.md").exists()
         assert (tmp_path / "tests" / "test_my_test_skill.py").exists()
 
         # Manifest is valid JSON with correct values
-        manifest = json.loads(
-            (tmp_path / "plugins" / "my_test_skill" / "skill.json").read_text()
-        )
+        manifest = json.loads((pack_dir / "skill.json").read_text())
         assert manifest["name"] == "my-test-skill"
         assert manifest["version"] == "0.1.0"
         assert manifest["author"] == "Tester"
 
-        # Plugin module has correct constants
-        plugin_src = (tmp_path / "plugins" / "my_test_skill.py").read_text()
-        assert 'PLUGIN_NAME = "my-test-skill"' in plugin_src
-        assert 'PLUGIN_DESCRIPTION = "A test skill"' in plugin_src
-        assert "def register(manager)" in plugin_src
+        # SKILL.md references the skill name
+        skill_src = (pack_dir / "skills" / "my_test_skill" / "SKILL.md").read_text()
+        assert "my-test-skill" in skill_src
+        assert "A test skill" in skill_src
+
+        # Hooks module has register function
+        hooks_src = (pack_dir / "hooks.py").read_text()
+        assert 'PLUGIN_NAME = "my-test-skill"' in hooks_src
+        assert "def register(manager)" in hooks_src
 
     def test_generate_skill_returns_paths(self, tmp_path):
         from scaffolds import generate_skill
 
         generated = generate_skill("cool-skill", output_dir=tmp_path)
-        assert "plugin" in generated
         assert "manifest" in generated
-        assert "setup" in generated
+        assert "context" in generated
+        assert "skill" in generated
+        assert "hooks" in generated
         assert "test" in generated
+
+    def test_install_skill_copies_to_claude_skills(self, tmp_path):
+        from scaffolds import generate_skill, install_skill
+
+        # Generate a pack
+        generate_skill("test-pack", description="Test", output_dir=tmp_path)
+        pack_dir = tmp_path / "packs" / "test_pack"
+
+        # Install it
+        target_dir = tmp_path / ".claude" / "skills"
+        installed = install_skill(pack_dir, target_dir=target_dir)
+
+        assert "test_pack" in installed
+        assert (target_dir / "test_pack" / "SKILL.md").exists()
+        assert (target_dir / "test_pack" / "CONTEXT.md").exists()
+
+    def test_list_packs(self, tmp_path):
+        from scaffolds import generate_skill, list_packs
+
+        generate_skill("pack-a", description="Pack A", output_dir=tmp_path)
+        generate_skill("pack-b", description="Pack B", output_dir=tmp_path)
+
+        packs = list_packs(tmp_path / "packs")
+        assert len(packs) == 2
+        names = {p["name"] for p in packs}
+        assert names == {"pack-a", "pack-b"}
+
+    def test_list_packs_empty(self, tmp_path):
+        from scaffolds import list_packs
+
+        packs = list_packs(tmp_path / "nonexistent")
+        assert packs == []
 
     def test_slugify_names(self):
         from scaffolds import _slugify
@@ -299,6 +332,28 @@ class TestScaffolding:
         assert _slugify("CamelCase Plugin") == "camelcase_plugin"
         assert _slugify("---weird---") == "weird"
         assert _slugify("") == "my_skill"
+
+
+class TestArcGISPack:
+    """Test the bundled ArcGIS example skill pack."""
+
+    ARCGIS_DIR = Path(__file__).parent.parent / "packs" / "arcgis"
+
+    def test_manifest_exists(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        assert manifest["name"] == "arcgis"
+        assert "arcpy" in manifest["capabilities"]
+
+    def test_context_has_content(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "arcpy" in context
+        assert "SearchCursor" in context
+        assert "SpatialReference" in context
+
+    def test_skill_md_exists(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis" / "SKILL.md").read_text()
+        assert "name: arcgis" in skill
+        assert "user-invocable: true" in skill
 
 
 if __name__ == "__main__":

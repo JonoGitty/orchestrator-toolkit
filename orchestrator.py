@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Orchestrator Toolkit — lean middleware for AI coding agents.
+Orchestrator Toolkit — skill pack manager for AI coding agents.
 
-Sits between AI agents (Claude Code, OpenAI Codex, etc.) and the machine.
-Handles plan execution, multi-stack building, plugin hooks, and coordination.
-The AI tools handle reasoning; this handles execution.
+Manages domain knowledge packs (skills) that teach Claude Code, OpenClaw,
+and other AI agents about specific domains (ArcGIS, Terraform, etc.).
+Also provides plan execution, multi-stack building, and plugin hooks.
+Patchwork (codex-audit) integration tracks everything.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ logger = logging.getLogger("orchestrator")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+PACKS_DIR = BASE_DIR / "packs"
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +108,29 @@ def run_project(project_dir: Path, plugins: Optional[PluginManager] = None) -> i
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="orchestrator",
-        description="Orchestrator Toolkit — middleware for AI coding agents",
+        description="Orchestrator Toolkit — skill pack manager for AI coding agents",
     )
     sub = p.add_subparsers(dest="command")
+
+    # --- Skill pack management ---
+
+    # new-skill: scaffold a new skill pack
+    ns = sub.add_parser("new-skill", help="Create a new skill pack")
+    ns.add_argument("name", help="Skill name (e.g. 'arcgis', 'terraform')")
+    ns.add_argument("--description", "-d", default="", help="Short description")
+    ns.add_argument("--author", "-a", default="", help="Author name")
+
+    # install-skill: install a pack into .claude/skills/
+    inst = sub.add_parser("install-skill", help="Install a skill pack into Claude Code")
+    inst.add_argument("pack", help="Pack name (from packs/) or path to pack directory")
+
+    # list-packs: show available skill packs
+    sub.add_parser("list-packs", help="List available skill packs")
+
+    # plugins: list loaded hook plugins
+    sub.add_parser("plugins", help="List loaded hook plugins")
+
+    # --- Plan execution (legacy / CI) ---
 
     # generate: prompt -> plan -> build
     gen = sub.add_parser("generate", help="Generate and build a project from a prompt")
@@ -124,15 +146,6 @@ def _build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run an already-built project")
     run.add_argument("project_dir", type=Path, help="Project directory")
 
-    # plugins: list loaded plugins
-    sub.add_parser("plugins", help="List loaded plugins")
-
-    # new-skill: scaffold a new plugin
-    ns = sub.add_parser("new-skill", help="Scaffold a new OpenClaw skill plugin")
-    ns.add_argument("name", help="Skill name (e.g. 'my-awesome-skill')")
-    ns.add_argument("--description", "-d", default="", help="Short description")
-    ns.add_argument("--author", "-a", default="", help="Author name")
-
     return p
 
 
@@ -143,31 +156,77 @@ def main(argv: Optional[List[str]] = None) -> int:
     plugins = PluginManager()
     plugins.discover()
 
-    if args.command == "generate":
-        prompt = " ".join(args.prompt)
-        plan = generate_plan(prompt)
-        result = execute_plan(plan, output_dir=args.output, plugins=plugins)
-        print(f"\nProject ready: {result['project_dir']}")
-        print(f"Stack: {result.get('stack', 'unknown')}")
-        if result.get("run_cmd"):
-            print(f"Run:   {result['run_cmd']}")
+    # ------------------------------------------------------------------
+    # Skill pack management commands
+    # ------------------------------------------------------------------
+
+    if args.command == "new-skill":
+        from scaffolds import generate_skill
+        generated = generate_skill(
+            args.name,
+            description=args.description,
+            author=args.author,
+            output_dir=BASE_DIR,
+        )
+        print(f"Skill pack '{args.name}' created!")
+        print()
+        for kind, path in generated.items():
+            print(f"  {kind:10s} -> {path}")
+        print()
+        print("Next steps:")
+        print(f"  1. Fill in packs/...CONTEXT.md with domain knowledge")
+        print(f"  2. Edit the SKILL.md slash command definition")
+        print(f"  3. Install into Claude Code: python orchestrator.py install-skill {args.name}")
         return 0
 
-    elif args.command == "execute":
-        plan = json.loads(args.plan_file.read_text(encoding="utf-8"))
-        result = execute_plan(plan, output_dir=args.output, plugins=plugins)
-        print(f"\nProject ready: {result['project_dir']}")
+    elif args.command == "install-skill":
+        from scaffolds import install_skill
+        # Resolve pack path: either a name in packs/ or a direct path
+        pack_path = Path(args.pack)
+        if not pack_path.is_dir():
+            pack_path = PACKS_DIR / args.pack
+        if not pack_path.is_dir():
+            print(f"Pack not found: {args.pack}")
+            print(f"Available packs: {', '.join(p.name for p in PACKS_DIR.iterdir() if p.is_dir())}"
+                  if PACKS_DIR.is_dir() else "No packs/ directory found.")
+            return 1
+
+        installed = install_skill(pack_path, target_dir=BASE_DIR / ".claude" / "skills")
+        if installed:
+            print(f"Installed skill pack from {pack_path.name}:")
+            for name, dest in installed.items():
+                print(f"  /{name} -> {dest}")
+            print(f"\nClaude Code will now see the /{list(installed.keys())[0]} command.")
+        else:
+            print(f"No SKILL.md files found in {pack_path}")
         return 0
 
-    elif args.command == "run":
-        return run_project(args.project_dir, plugins=plugins)
+    elif args.command == "list-packs":
+        from scaffolds import list_packs
+        packs = list_packs(PACKS_DIR)
+        if not packs:
+            print("No skill packs found in packs/")
+            print("Create one: python orchestrator.py new-skill <name>")
+        else:
+            print(f"Available skill packs ({len(packs)}):\n")
+            for p in packs:
+                line = f"  {p['name']}"
+                if p.get("version") and p["version"] != "0.0.0":
+                    line += f" v{p['version']}"
+                if p.get("description"):
+                    line += f" — {p['description']}"
+                print(line)
+                if p.get("capabilities"):
+                    print(f"    capabilities: {', '.join(p['capabilities'])}")
+            print(f"\nInstall: python orchestrator.py install-skill <name>")
+        return 0
 
     elif args.command == "plugins":
         loaded = plugins.list_plugins_detailed()
         if not loaded:
-            print("No plugins loaded.")
+            print("No hook plugins loaded.")
         else:
-            print("Loaded plugins:")
+            print("Loaded hook plugins:")
             for p in loaded:
                 line = f"  - {p['name']}"
                 if p.get("version") and p["version"] != "0.0.0":
@@ -189,22 +248,28 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"\nCustom hook events: {', '.join(custom)}")
         return 0
 
-    elif args.command == "new-skill":
-        from scaffolds import generate_skill
-        generated = generate_skill(
-            args.name,
-            description=args.description,
-            author=args.author,
-            output_dir=BASE_DIR,
-        )
-        print(f"Skill '{args.name}' scaffolded! Files created:")
-        for kind, path in generated.items():
-            print(f"  {kind:10s} -> {path}")
-        print(f"\nNext steps:")
-        print(f"  1. Edit plugins/ module to add your logic")
-        print(f"  2. Run tests: python -m pytest {generated.get('test', 'tests/')} -v")
-        print(f"  3. List plugins: python orchestrator.py plugins")
+    # ------------------------------------------------------------------
+    # Plan execution commands (for CI / headless use)
+    # ------------------------------------------------------------------
+
+    elif args.command == "generate":
+        prompt = " ".join(args.prompt)
+        plan = generate_plan(prompt)
+        result = execute_plan(plan, output_dir=args.output, plugins=plugins)
+        print(f"\nProject ready: {result['project_dir']}")
+        print(f"Stack: {result.get('stack', 'unknown')}")
+        if result.get("run_cmd"):
+            print(f"Run:   {result['run_cmd']}")
         return 0
+
+    elif args.command == "execute":
+        plan = json.loads(args.plan_file.read_text(encoding="utf-8"))
+        result = execute_plan(plan, output_dir=args.output, plugins=plugins)
+        print(f"\nProject ready: {result['project_dir']}")
+        return 0
+
+    elif args.command == "run":
+        return run_project(args.project_dir, plugins=plugins)
 
     else:
         parser.print_help()

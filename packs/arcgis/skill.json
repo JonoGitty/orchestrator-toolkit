@@ -1,0 +1,14 @@
+{
+  "name": "arcgis",
+  "version": "0.1.0",
+  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis",
+  "author": "OpenClaw Community",
+  "dependencies": [],
+  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis"],
+  "skills": [
+    "skills/arcgis"
+  ],
+  "context_files": [
+    "CONTEXT.md"
+  ]
+}

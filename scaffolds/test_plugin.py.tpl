@@ -1,7 +1,8 @@
 """
-Tests for {{SKILL_NAME}} skill plugin.
+Tests for {{SKILL_NAME}} skill pack.
 Run with: python -m pytest tests/test_{{SKILL_SLUG}}.py -v
 """
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,42 +14,38 @@ sys.modules.setdefault("openai", MagicMock())
 
 from plugins import PluginManager
 
+PACK_DIR = Path(__file__).parent.parent / "packs" / "{{SKILL_SLUG}}"
 
-class Test{{SKILL_CLASS}}:
-    """Test the {{SKILL_NAME}} plugin."""
 
-    def _make_manager(self):
+class Test{{SKILL_CLASS}}Pack:
+    """Test the {{SKILL_NAME}} skill pack structure."""
+
+    def test_manifest_exists_and_valid(self):
+        manifest_path = PACK_DIR / "skill.json"
+        assert manifest_path.exists(), "skill.json manifest is missing"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["name"] == "{{SKILL_NAME}}"
+        assert "description" in manifest
+        assert "version" in manifest
+
+    def test_context_file_exists(self):
+        assert (PACK_DIR / "CONTEXT.md").exists(), "CONTEXT.md is missing"
+
+    def test_skill_md_exists(self):
+        skill_dir = PACK_DIR / "skills" / "{{SKILL_SLUG}}"
+        assert (skill_dir / "SKILL.md").exists(), "SKILL.md is missing"
+
+    def test_hooks_load_without_error(self):
+        hooks_path = PACK_DIR / "hooks.py"
+        if not hooks_path.exists():
+            pytest.skip("No hooks.py — pack is context-only")
         pm = PluginManager()
-        # Import and register the plugin
-        import plugins.{{SKILL_SLUG}} as skill
-        skill.register(pm)
-        return pm
-
-    def test_registers_hooks(self):
-        pm = self._make_manager()
-        # Verify hooks were registered
-        assert len(pm._hooks["pre_execute"]) >= 1
-        assert len(pm._hooks["post_execute"]) >= 1
-
-    def test_pre_execute_passes_plan(self):
-        pm = self._make_manager()
-        plan = {"name": "test-project", "files": []}
-        result = pm.hook("pre_execute", plan=plan)
-        # Should return None (pass-through) or the plan
-        assert result is None or isinstance(result, dict)
-
-    def test_post_execute_runs(self):
-        pm = self._make_manager()
-        plan = {"name": "test-project", "files": []}
-        result_data = {"project_dir": "/tmp/test", "stack": "python"}
-        # Should not raise
-        pm.hook("post_execute", plan=plan, result=result_data)
-
-    def test_plugin_metadata(self):
-        import plugins.{{SKILL_SLUG}} as skill
-        assert hasattr(skill, "PLUGIN_NAME")
-        assert hasattr(skill, "PLUGIN_DESCRIPTION")
-        assert hasattr(skill, "PLUGIN_VERSION")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("hooks", hooks_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if hasattr(mod, "register"):
+            mod.register(pm)
 
 
 if __name__ == "__main__":

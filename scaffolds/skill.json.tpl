@@ -5,9 +5,11 @@
   "author": "{{AUTHOR}}",
   "dependencies": [],
   "capabilities": [],
-  "hooks": [
-    "pre_execute",
-    "post_execute"
+  "skills": [
+    "skills/{{SKILL_SLUG}}"
   ],
-  "entry_module": "plugins.{{SKILL_SLUG}}"
+  "context_files": [
+    "CONTEXT.md"
+  ],
+  "hooks_module": "hooks.py"
 }

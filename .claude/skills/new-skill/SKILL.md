@@ -1,14 +1,14 @@
 ---
 name: new-skill
-description: Scaffold a new OpenClaw skill plugin with all boilerplate (module, manifest, setup.py, tests)
+description: Create a new domain knowledge skill pack (CONTEXT.md + SKILL.md + manifest)
 user-invocable: true
 argument-hint: "[skill-name]"
-allowed-tools: Bash, Read, Edit
+allowed-tools: Bash, Read, Edit, Write
 ---
 
-# New Skill
+# New Skill Pack
 
-Scaffold a complete OpenClaw skill plugin for the orchestrator toolkit.
+Create a new domain knowledge skill pack for the orchestrator toolkit.
 
 ## Steps
 
@@ -18,11 +18,12 @@ Scaffold a complete OpenClaw skill plugin for the orchestrator toolkit.
 python orchestrator.py new-skill $ARGUMENTS
 ```
 
-This generates 4 files:
-- `plugins/<slug>.py` — the plugin module with hook stubs
-- `plugins/<slug>/skill.json` — metadata manifest
-- `plugins/<slug>/setup.py` — for pip-installable distribution
-- `tests/test_<slug>.py` — starter test suite
+This creates a pack in `packs/<name>/` with:
+- `skill.json` — manifest with name, version, capabilities
+- `CONTEXT.md` — domain knowledge template (fill this in!)
+- `skills/<name>/SKILL.md` — Claude Code slash command
+- `hooks.py` — optional Python hooks for guardrails
+- `tests/test_<name>.py` — pack structure tests
 
 2. Optionally add description and author:
 
@@ -31,6 +32,6 @@ python orchestrator.py new-skill $0 --description "$1" --author "$2"
 ```
 
 3. After scaffolding, help the user:
-   - Edit the plugin module to implement their hook logic
-   - Run the generated tests: `python -m pytest tests/test_<slug>.py -v`
-   - Verify it loads: `python orchestrator.py plugins`
+   - Fill in CONTEXT.md with domain knowledge (APIs, patterns, gotchas)
+   - Customize the SKILL.md slash command definition
+   - Install into Claude Code: `python orchestrator.py install-skill <name>`

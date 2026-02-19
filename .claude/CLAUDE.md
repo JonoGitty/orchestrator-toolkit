@@ -1,50 +1,52 @@
 # Orchestrator Toolkit
 
-Lean execution middleware for AI coding agents. Sits between AI reasoning (Claude Code, Codex, Cursor) and the machine.
+Skill pack manager for AI coding agents. Creates and manages domain knowledge
+packs that teach Claude Code / OpenClaw about specific domains (ArcGIS, Terraform,
+data science, etc.). Patchwork (codex-audit) tracks everything.
 
-## Architecture
+## What is a skill pack?
 
-- `orchestrator.py` — CLI entry point, core API (`generate_plan`, `execute_plan`, `run_project`)
-- `plugins/__init__.py` — PluginManager with hook lifecycle, custom events, dependency resolution
-- `runtime/plan_runner.py` — Stack detection, dependency install, build, run.sh generation
-- `config.py` — Dataclass-based config with JSON file support
-- `cloud_agent/` — LLM plan generation via OpenAI
-- `scaffolds/` — Skill templates for `orchestrator new-skill`
+A self-contained directory that gives Claude Code domain expertise:
 
-## Plugin / Skill System
+```
+packs/<name>/
+    skill.json              # manifest (name, version, capabilities)
+    CONTEXT.md              # domain knowledge (APIs, patterns, gotchas)
+    skills/<name>/SKILL.md  # Claude Code slash command
+    hooks.py                # optional Python hooks for guardrails
+```
 
-Plugins hook into 7 lifecycle events via `PluginManager.add_hook(event, callback, priority=N)`:
-
-| Hook | Fires when | Can return |
-|------|-----------|------------|
-| `pre_execute` | Before plan applied | Modified plan dict |
-| `post_execute` | After plan applied | — |
-| `pre_run` | Before project runs | — |
-| `post_run` | After project runs | — |
-| `detect_stack` | During stack detection | Stack name string |
-| `pre_build` | Before dep install/build | — |
-| `post_build` | After build completes | — |
-
-Plugins can also register **custom** hook events for skill-to-skill communication.
+When installed, the SKILL.md + CONTEXT.md are copied into `.claude/skills/`
+so Claude Code discovers them as `/slash-commands`.
 
 ## CLI Commands
 
 ```
-orchestrator generate <prompt>       # LLM prompt -> plan -> build
-orchestrator execute <plan.json>     # Apply existing plan JSON
-orchestrator run <project_dir>       # Run built project
-orchestrator plugins                 # List loaded plugins with metadata
-orchestrator new-skill <name>        # Scaffold a new skill plugin
+orchestrator new-skill <name>        # Create a new skill pack
+orchestrator install-skill <name>    # Install into Claude Code
+orchestrator list-packs              # Show available packs
+orchestrator plugins                 # List loaded hook plugins
 ```
 
-## Stack Detection
+Plan execution (CI/headless):
+```
+orchestrator generate <prompt>       # LLM prompt -> plan -> build
+orchestrator execute <plan.json>     # Apply existing plan
+orchestrator run <project_dir>       # Run built project
+```
 
-Auto-detects: python (pip/poetry/pdm), node (npm/yarn/pnpm + Vite), go, rust, java-gradle, java-maven, java-plain, cpp, generic.
+## Architecture
+
+- `packs/` — skill pack directory (domain knowledge + SKILL.md)
+- `scaffolds/` — templates for generating new skill packs
+- `plugins/__init__.py` — PluginManager for hook-based plugins
+- `plugins/patchwork_audit.py` — audit trail via codex-audit
+- `orchestrator.py` — CLI and core API
+- `runtime/plan_runner.py` — plan execution engine
+- `config.py` — configuration management
 
 ## Key Conventions
 
-- Plugin modules live in `plugins/` with a `register(manager)` function
-- `skill.json` manifests provide rich metadata (version, deps, capabilities)
-- Entry-point packages (`orchestrator.plugins` group) are auto-discovered
+- Skill packs live in `packs/` with a `skill.json` manifest
+- Hook plugins live in `plugins/` with a `register(manager)` function
 - Tests use pytest: `python -m pytest tests/ -v`
-- Config lives at `~/.config/orchestrator-toolkit/config.json`
