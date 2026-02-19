@@ -1,32 +1,26 @@
-AI Orchestrator — Elevator Pitch (One Pager)
+# Orchestrator Toolkit — Elevator Pitch
 
-What it is
-AI Orchestrator is a cross-platform AI system controller that turns natural
-language into working software and immediate system actions. It reads a prompt,
-generates a structured project plan, builds and runs the project, and provides
-an interactive command console to control apps, files, and core system tasks.
+## What it is
 
-What it does
-- Converts prompts into runnable projects (Python, web apps, CLIs, tools).
-- Writes files, installs dependencies, and creates launchers automatically.
-- Runs the result immediately and logs output for quick iteration.
-- Offers an interactive shell for system actions (apps, wifi, window control).
-- Keeps project output organized with Save/Delete/Keep policies.
+A lean middleware layer that sits between AI coding agents (Claude Code, OpenAI
+Codex, Cursor) and the machine. The agents handle reasoning and code generation;
+the orchestrator handles execution, building, and coordination.
 
-Why it matters
-It collapses the gap between idea and execution. Instead of switching between
-chat, editor, terminal, and browser, the orchestrator becomes the single place
-where ideas are built, run, and managed.
+## What it does
 
-Future development
-The long-term vision is an adaptive GUI that encompasses the entire workflow:
-- A unified interface that shows only what you need, when you need it.
-- Embedded webviews for generated web apps (no context switching).
-- Expandable panels and an HUD-style layout for deep system visibility.
-- Voice control and intent-driven actions layered on top of the same API.
-- A Linux-first "OS-like" mode where all interaction flows through the
-  orchestrator, while preserving cross-platform support today.
+- Takes structured plans (from any AI agent) and executes them
+- Detects language stack and installs dependencies automatically
+- Builds and runs projects across Python, Node.js, Go, Rust, Java, C++
+- Plugin system for extending with audit trails, policy enforcement, etc.
+- Ships with a Patchwork (codex-audit) integration for tamper-evident audit logs
 
-Status
-This is a living project. The core generator and command console already work,
-and the UI layer is evolving toward a single, adaptive control surface.
+## Why it matters
+
+AI coding tools can generate code but can't build and run it reliably on your
+machine. This is the execution layer that fills that gap — stack-aware, pluggable,
+and designed to be called programmatically by AI agents or CI/CD pipelines.
+
+## Status
+
+v0.2 — stripped down from a larger app-builder project to focus on the middleware
+use case. Plugin system is live, Patchwork integration is ready.

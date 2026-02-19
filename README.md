@@ -1,182 +1,144 @@
+# Orchestrator Toolkit
+
+Lean middleware for AI coding agents. Sits between AI tools (Claude Code, OpenAI
+Codex, Cursor, etc.) and the machine — handling plan execution, multi-stack
+building, and plugin-based extensibility.
+
+The AI agents handle reasoning; this handles execution.
+
+## What it does
+
+- Accepts structured plans (JSON with files, deps, and run commands)
+- Detects stack: Python, Node.js, Go, Rust, Java, C++
+- Installs dependencies and builds automatically
+- Creates run scripts and executes projects
+- Plugin system for audit, policy, and integrations (e.g. Patchwork/codex-audit)
+
+## Quick start
+
+```bash
+git clone https://github.com/JonoGitty/orchestrator-toolkit.git
+cd orchestrator-toolkit
+pip install -r requirements.txt
 ```
- █████╗ ██╗
-██╔══██╗██║
-███████║██║
-██╔══██║██║
-██║  ██║██║
-╚═╝  ╚═╝╚═╝
 
- ██████╗ ██████╗  ██████╗ ██╗  ██╗ ███████╗ ███████╗████████╗██████╗  █████╗ ████████╗███████╗
-██╔═══██╗██╔══██╗██╔════╝ ██║  ██║ ██╔════╝ ██╔════╝╚══██╔══╝██╔══██╗██╔══██╗╚══██╔══╝██╔════╝
-██║   ██║██████╔╝██║      ███████║ █████╗   ███████╗   ██║   ██████╔╝███████║   ██║   █████╗  
-██║   ██║██╔══██╗██║      ██╔══██║ ██╔══╝   ╚════██║   ██║   ██╔══██╗██╔══██║   ██║   ██╔══╝  
-╚██████╔╝██║  ██║╚██████╗ ██║  ██║ ███████╗ ███████║   ██║   ██║  ██║██║  ██║   ██║   ███████╗
- ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚══════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
+## Usage
 
-AI ORCHESTRATE
-AI-powered full system controller
+### Generate a project from a prompt
+
+```bash
+python orchestrator.py generate "build a FastAPI todo API"
 ```
 
-AI Orchestrator
+### Execute a pre-built plan
 
-A cross-platform AI project generator with an interactive command console.
-It turns prompts into runnable projects and can perform a set of system
-actions from the same session.
+```bash
+python orchestrator.py execute plan.json
+```
 
-What it does
-- Sends your prompt to an LLM (OpenAI GPT-5 by default).
-- Parses a structured plan and writes files to disk.
-- Detects stack, installs deps, creates launchers, and runs the project.
-- Classifies output as PROGRAM vs ONE-OFF to decide where to save it.
-- Provides an interactive shell with system commands (apps, wifi, windows, etc).
+### Run an already-built project
 
-Platforms
-- Linux
-- macOS
-- Windows (PowerShell and CMD)
-- WSL
-- GitHub Codespaces
+```bash
+python orchestrator.py run output/my-project
+```
 
-Features
-- Project generation: Python, web apps, CLIs, utilities, scripts, games.
-- Plan normalization: tolerant JSON parsing with fallback to text wrapping.
-- Stack-aware builds: Python (venv), Node (npm/yarn/pnpm), Go, Rust, Java, C++.
-- Launchers: run.sh, run.command, run.bat, plus HOW_TO_RUN.txt for apps.
-- Save policies: Auto, Save, Delete, Keep (ask after run).
-- Interactive commands: history, open/run projects, app launching, wifi, DND.
-- Plan cache with TTL (configurable).
-- Optional git init and initial commit in generated projects.
-- Optional desktop GUI shell with embedded webview (PySide6).
+### List loaded plugins
 
-Quick start
-1) Clone the repository
-   git clone https://github.com/JonoGitty/ai_orchestrator.git
-   cd ai_orchestrator
+```bash
+python orchestrator.py plugins
+```
 
-2) Install dependencies
-   pip install -r requirements.txt
+## Programmatic API
 
-API key setup
-Supported key sources (first match wins):
-1) Local file (development): cloud_agent/apikey.txt
-2) Environment variable: OPENAI_API_KEY
-3) System keyring: service "ai_orchestrator", key "openai_api_key"
-4) Config file: ~/.config/ai_orchestrator/openai_api_key
+```python
+from orchestrator import generate_plan, execute_plan
+from plugins import PluginManager
 
-Examples
-Linux / macOS (one-shot prompt)
-OPENAI_API_KEY="sk-yourkey" python3 orchestrator.py "Make me a GUI app"
+plugins = PluginManager()
+plugins.discover()
 
-Windows PowerShell
-$env:OPENAI_API_KEY = "sk-yourkey"; python orchestrator.py "Make me a GUI app"
+plan = generate_plan("build a CLI calculator")
+result = execute_plan(plan, plugins=plugins)
+print(result["project_dir"], result["stack"], result["run_cmd"])
+```
 
-Windows CMD
-set OPENAI_API_KEY=sk-yourkey && python orchestrator.py "Make me a GUI app"
+## Plugin system
 
-Usage
-Interactive session:
-  python3 orchestrator.py
+Plugins are Python modules in `plugins/` that expose a `register(manager)` function.
+Hook into the orchestration lifecycle:
 
-One-shot (prompt provided on command line or stdin):
-  python3 orchestrator.py "build me a small todo CLI"
+| Hook | When | Can modify |
+|------|------|------------|
+| `pre_execute` | Before plan is applied | plan (return modified) |
+| `post_execute` | After plan is applied | — |
+| `pre_run` | Before running a project | — |
+| `post_run` | After running a project | — |
 
-You will be prompted for a save policy:
-  A = Auto (program -> SAVED, one-off -> RUNNING)
-  S = Save
-  D = Delete
-  K = Keep (ask after run)
+Example plugin (`plugins/my_plugin.py`):
 
-Interactive commands (high level)
-  /help, /history, /open N, /run N, /prune N
-  /apps, /openapp, /openfile, /openpath
-  /which, /ps, /stop, /openlast
-  /dnd, /wifi, /vpn, /winlist, /focus, /max, /movews
-  /setup, /wizard, /sweep
+```python
+PLUGIN_NAME = "my-plugin"
+PLUGIN_DESCRIPTION = "Logs every execution"
 
-Natural commands also work (examples):
-  open chrome
-  open ~/Downloads
-  volume 40
-  brightness 70
-  wifi list
+def on_pre_execute(plan, **kwargs):
+    print(f"Executing: {plan['name']}")
+    return plan
 
-Desktop GUI shell (optional)
-The GUI shell runs the same core orchestration flow, but adds a log panel and
-an embedded webview that can load local app URLs detected from output.
+def register(manager):
+    manager.add_hook("pre_execute", on_pre_execute)
+```
 
-Run:
-  python3 gui_shell.py
+### Patchwork (codex-audit) plugin
 
-Dependencies:
-  PySide6
-  PySide6-QtWebEngine (for QWebEngineView)
+Built-in integration with [codex-audit](https://github.com/JonoGitty/codex-audit)
+for audit trails and policy enforcement. Install Patchwork and it auto-activates:
 
-Generated projects
-Default output locations:
-- SAVED/   persistent projects
-- RUNNING/ temporary projects
+```bash
+npm install -g patchwork-audit
+```
 
-Each project includes:
-- run.sh
-- run.command
-- run.bat
-- HOW_TO_RUN.txt (apps only)
-- your source files and stack-specific assets
+## Configuration
 
-Configuration
-User config file:
-  ~/.config/ai_orchestrator/config.json
+User config: `~/.config/orchestrator-toolkit/config.json`
 
-Defaults:
+```json
 {
   "llm": {
-    "model": "gpt-5",
+    "model": "gpt-4.1",
     "temperature": 1.0,
     "max_retries": 3,
     "cache_enabled": true,
     "cache_ttl_seconds": 86400
   },
-  "behavior": {
-    "default_save_policy": "A",
-    "auto_run": true,
-    "verbose_logging": false
-  },
   "paths": {
-    "saved_dir": "SAVED",
-    "running_dir": "RUNNING",
-    "config_dir": "~/.config/ai_orchestrator"
+    "output_dir": "output",
+    "config_dir": "~/.config/orchestrator-toolkit"
   },
-  "security": {
-    "prefer_keyring": true,
-    "allow_plaintext_fallback": true,
-    "allow_system_actions": true,
-    "confirm_system_actions": true
+  "plugins": {
+    "enabled": [],
+    "plugin_dir": "plugins"
   }
 }
+```
 
-Logging and recovery
-- LLM retries with exponential backoff.
-- Bad replies saved to SAVED/bad_reply.json.
-- Runtime logs in orchestrator.log.
+## API key setup
 
-Command runner utility
-- utils/runner.py provides a unified command runner that logs stdout/stderr to
-  runtime/command_log.jsonl. This is a building block for future action
-  auditing and confirmation flows.
+For LLM plan generation (first match wins):
+1. Local file: `cloud_agent/apikey.txt`
+2. Environment variable: `OPENAI_API_KEY`
+3. System keyring
+4. Config file: `~/.config/orchestrator-toolkit/openai_api_key`
 
-Docs
-- docs/potential-command-runner.md
-- docs/potential-terminal-ui.md
+## Testing
 
-Backup CLI
-The separate CLI wrapper provides backup commands:
-  python3 orchestrator_cli.py
-  /backup
-  /install-nightly-backup [HH:MM]
-  /uninstall-nightly-backup
+```bash
+python -m pytest tests/ -v
+```
 
-Changelog
-See CHANGELOG.md.
+## Supported stacks
 
-Testing
-python -m pytest -v
+Python (venv/poetry/pdm), Node.js (npm/yarn/pnpm), Go, Rust, Java (Gradle/Maven), C++
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

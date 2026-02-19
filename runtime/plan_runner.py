@@ -3,7 +3,7 @@ import os, sys, json, shutil, subprocess, re, logging
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 
-from utils.helper import slugify, safe_join, ensure_executable, attach_launchers
+from utils.helper import slugify, safe_join, ensure_executable, write_run_script
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +454,7 @@ def _final_run_cmd(stack: str, project_dir: Path, plan_run: str, venv_dir: Optio
 
     return ""
 
-def apply_plan(plan: Dict[str, Any], base_dir: Path, *, is_app: bool = True) -> Dict[str, Any]:
+def apply_plan(plan: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
     name = plan.get("name") or "Generated Project"
     logger.info(f"Applying plan for project: {name}")
     slug = slugify(name) or "project"
@@ -493,24 +493,10 @@ def apply_plan(plan: Dict[str, Any], base_dir: Path, *, is_app: bool = True) -> 
     run_cmd = _final_run_cmd(stack, project_dir, plan.get("run",""), venv_dir, python_hint)
     logger.info(f"Final run command: {run_cmd}")
 
-    # Create launchers and HOW_TO_RUN.txt
-    attach_launchers(
-        str(project_dir),
-        [str(p) for p in written],
-        direct_cmd=run_cmd,   # ensures HOW_TO_RUN uses the real launch command
-        is_app=is_app         # only write HOW_TO_RUN for apps
-    )
-    logger.info("Attached launchers")
-
-    # Initialize git repository if available
-    try:
-        if _check_exists("git"):
-            _init_git_repo(project_dir)
-            logger.info("Initialized git repository")
-        else:
-            logger.info("Git not available; skipping repo initialization")
-    except Exception as e:
-        logger.warning(f"Git initialization failed: {e}")
+    # Create a simple run.sh launcher
+    if run_cmd:
+        write_run_script(project_dir, run_cmd)
+        logger.info("Created run.sh launcher")
 
     result = {
         "project_dir": str(project_dir),

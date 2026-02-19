@@ -1,99 +1,33 @@
 #!/usr/bin/env python3
 """
-Basic test suite for AI Orchestrator critical components.
+Test suite for Orchestrator Toolkit.
 Run with: python -m pytest tests/ -v
 """
-import pytest
 import json
-import tempfile
+import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-# Add the project root to Python path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from unittest.mock import MagicMock
 
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Ensure 'openai' is importable for tests (mocked)
-sys.modules.setdefault('openai', MagicMock())
+sys.modules.setdefault("openai", MagicMock())
 
-from orchestrator import classify_code, choose_root, SAVED_DIR, RUNNING_DIR
 from cloud_agent.cloud_client import _parse_any_plan, _normalize_plan
-from config import Config, get_config_manager, ConfigManager
-
-
-class TestCodeClassification:
-    """Test the code classification logic."""
-
-    def test_classify_program_imports(self):
-        """Test classification based on GUI framework imports."""
-        code_with_tkinter = "import tkinter\nroot = tkinter.Tk()\nroot.mainloop()"
-        assert classify_code(code_with_tkinter) == "PROGRAM"
-
-        code_with_flask = "from flask import Flask\napp = Flask(__name__)"
-        assert classify_code(code_with_flask) == "PROGRAM"
-
-    def test_classify_program_patterns(self):
-        """Test classification based on code patterns."""
-        code_with_mainloop = "root.mainloop()"
-        assert classify_code(code_with_mainloop) == "PROGRAM"
-
-        code_with_argparse = "import argparse\nparser = argparse.ArgumentParser()"
-        assert classify_code(code_with_argparse) == "PROGRAM"
-
-    def test_classify_one_off(self):
-        """Test classification of simple one-off scripts."""
-        simple_print = "print('Hello, World!')"
-        assert classify_code(simple_print) == "ONE_OFF"
-
-        short_calculation = "result = 2 + 2\nprint(result)"
-        assert classify_code(short_calculation) == "ONE_OFF"
-
-    def test_classify_long_code(self):
-        """Test classification based on code length."""
-        long_code = "\n".join([f"print({i})" for i in range(150)])
-        assert classify_code(long_code) == "PROGRAM"
-
-
-class TestRootSelection:
-    """Test the root directory selection logic."""
-
-    def test_choose_root_save(self):
-        """Test SAVE policy always goes to SAVED."""
-        assert choose_root("S", True) == SAVED_DIR
-        assert choose_root("S", False) == SAVED_DIR
-
-    def test_choose_root_delete(self):
-        """Test DELETE policy always goes to RUNNING."""
-        assert choose_root("D", True) == RUNNING_DIR
-        assert choose_root("D", False) == RUNNING_DIR
-
-    def test_choose_root_keep(self):
-        """Test KEEP policy always goes to SAVED."""
-        assert choose_root("K", True) == SAVED_DIR
-        assert choose_root("K", False) == SAVED_DIR
-
-    def test_choose_root_auto(self):
-        """Test AUTO policy based on program type."""
-        assert choose_root("A", True) == SAVED_DIR  # Program -> SAVED
-        assert choose_root("A", False) == RUNNING_DIR  # One-off -> RUNNING
+from config import Config, ConfigManager, get_config_manager
+from plugins import PluginManager
 
 
 class TestPlanParsing:
     """Test JSON plan parsing and normalization."""
 
     def test_parse_valid_json_plan(self):
-        """Test parsing a valid JSON plan."""
         valid_plan = {
             "name": "test-project",
             "description": "A test project",
-            "files": [
-                {
-                    "filename": "main.py",
-                    "code": "print('Hello, World!')"
-                }
-            ],
-            "run": "python main.py"
+            "files": [{"filename": "main.py", "code": "print('Hello')"}],
+            "run": "python main.py",
         }
         raw_json = json.dumps(valid_plan)
         parsed = _parse_any_plan(raw_json)
@@ -101,55 +35,106 @@ class TestPlanParsing:
         assert len(parsed["files"]) == 1
 
     def test_parse_malformed_json(self):
-        """Test parsing malformed JSON falls back gracefully."""
-        malformed_json = '{"name": "test", "files": ['  # Missing closing brackets
-        parsed = _parse_any_plan(malformed_json)
-        # Should still return a normalized plan structure
+        malformed = '{"name": "test", "files": ['
+        parsed = _parse_any_plan(malformed)
         assert isinstance(parsed, dict)
         assert "name" in parsed or "files" in parsed
 
-    def test_normalize_plan(self):
-        """Test plan normalization."""
-        minimal_plan = {"name": "test"}
-        normalized = _normalize_plan(minimal_plan)
+    def test_normalize_plan_minimal(self):
+        normalized = _normalize_plan({"name": "test"})
         assert normalized["name"] == "test"
         assert normalized["files"] == []
         assert normalized["description"] == ""
         assert normalized["run"] == ""
+
+    def test_normalize_plan_array(self):
+        files = [{"filename": "app.py", "code": "print(1)"}]
+        normalized = _normalize_plan(files)
+        assert len(normalized["files"]) == 1
+        assert normalized["files"][0]["filename"] == "app.py"
+
+    def test_normalize_plan_string(self):
+        normalized = _normalize_plan("print('hello')")
+        assert normalized["files"][0]["filename"] == "main.py"
 
 
 class TestConfiguration:
     """Test configuration management."""
 
     def test_config_loading(self):
-        """Test loading configuration."""
-        config_manager = get_config_manager()
-        config = config_manager.config
+        config = get_config_manager().config
         assert isinstance(config, Config)
-        assert hasattr(config, 'llm')
-        assert hasattr(config, 'behavior')
-        assert hasattr(config, 'paths')
-        assert hasattr(config, 'security')
+        assert hasattr(config, "llm")
+        assert hasattr(config, "paths")
+        assert hasattr(config, "plugins")
+        assert hasattr(config, "security")
 
     def test_config_defaults(self):
-        """Test configuration defaults."""
         config = Config.from_dict({})
-        assert config.llm.model == "gpt-5"
+        assert config.llm.model == "gpt-4.1"
         assert config.llm.temperature == 1.0
-        assert config.behavior.default_save_policy == "A"
-        assert config.behavior.auto_run == True
+        assert config.llm.max_retries == 3
+        assert config.paths.output_dir == "output"
+        assert config.plugins.enabled == []
 
     def test_config_file_loading(self, tmp_path):
-        """Test loading configuration from file."""
         cfg = tmp_path / "config.json"
-        cfg.write_text('{"llm": {"model": "gpt-4"}, "behavior": {"auto_run": false}}', encoding="utf-8")
+        cfg.write_text(
+            '{"llm": {"model": "claude-sonnet-4-5-20250929"}, "paths": {"output_dir": "out"}}',
+            encoding="utf-8",
+        )
         manager = ConfigManager(config_file=cfg)
         config = manager._load_config()
-
-        assert config.llm.model == "gpt-4"
-        assert config.behavior.auto_run == False
-        # Should keep defaults for unspecified values
+        assert config.llm.model == "claude-sonnet-4-5-20250929"
+        assert config.paths.output_dir == "out"
+        # Defaults preserved for unspecified values
         assert config.llm.temperature == 1.0
+
+    def test_config_has_no_legacy_fields(self):
+        """Ensure legacy app-builder config is gone."""
+        config = Config.from_dict({})
+        assert not hasattr(config, "behavior")
+        assert not hasattr(config, "shortcuts")
+        d = config.to_dict()
+        assert "behavior" not in d
+        assert "shortcuts" not in d
+
+
+class TestPluginManager:
+    """Test the plugin system."""
+
+    def test_add_and_fire_hook(self):
+        pm = PluginManager()
+        results = []
+        pm.add_hook("pre_execute", lambda plan, **kw: results.append(plan))
+        pm.hook("pre_execute", plan={"name": "test"})
+        assert len(results) == 1
+        assert results[0]["name"] == "test"
+
+    def test_hook_returns_last_value(self):
+        pm = PluginManager()
+        pm.add_hook("pre_execute", lambda plan, **kw: {**plan, "modified": True})
+        result = pm.hook("pre_execute", plan={"name": "test"})
+        assert result["modified"] is True
+
+    def test_invalid_hook_name_raises(self):
+        pm = PluginManager()
+        with pytest.raises(ValueError):
+            pm.add_hook("invalid_event", lambda: None)
+
+    def test_register_and_list(self):
+        pm = PluginManager()
+        pm.register_plugin("test-plugin", "A test plugin")
+        plugins = pm.list_plugins()
+        assert len(plugins) == 1
+        assert plugins[0] == ("test-plugin", "A test plugin")
+
+    def test_hook_error_does_not_crash(self):
+        pm = PluginManager()
+        pm.add_hook("pre_execute", lambda plan, **kw: 1 / 0)  # raises
+        pm.add_hook("pre_execute", lambda plan, **kw: plan)
+        result = pm.hook("pre_execute", plan={"name": "test"})
+        assert result["name"] == "test"
 
 
 if __name__ == "__main__":

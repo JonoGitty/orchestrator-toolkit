@@ -74,37 +74,33 @@ def _load_api_key() -> str:
         "4. Config file: echo 'your-key-here' > ~/.config/ai_orchestrator/openai_api_key\n"
     )
 
-client = openai.OpenAI(api_key=_load_api_key())
+_client = None
+
+
+def _get_client():
+    """Lazy-init the OpenAI client (avoids crash on import without API key)."""
+    global _client
+    if _client is None:
+        _client = openai.OpenAI(api_key=_load_api_key())
+    return _client
 
 # ---- System prompt (nudges to single object; parser still handles anything) --
 DEFAULT_SYSTEM = r"""
-You are an AI project generator. Output ONLY a valid JSON object:
+You are a project plan generator for an orchestration toolkit.
+Output ONLY a valid JSON object with this structure:
 {
   "name": "<kebab-case-project-name>",
-  "description": "<one-line>",
-  "files": [{"filename": "<path>", "code": "<content>"}],
-  "post_install": ["<shell-cmd>"],
-  "run": "<command>"
+  "description": "<one-line description>",
+  "files": [{"filename": "<relative-path>", "code": "<file-content>"}],
+  "post_install": ["<optional shell commands to run after dependency install>"],
+  "run": "<command to run the project>"
 }
 Rules:
-1) Always fill "files" with the full project.
-2) If include requirements.txt if needed.
-3) Include runnable launchers:
-   - run.sh (bash)
-   - Run.desktop (Linux desktop shortcut)
-   - run.bat (Windows)
-   - run.command (macOS)
-   They must call the exact "run" command from project root.
-4) No explanations, no markdown — ONLY the JSON object.
-5) Ensure al  programs are robust and will work, check multiple times to ensure the pgramming will work
-6) ALways run the program first time
-7) Interpret what the user is wanting, even if the propmt is small, think about what the program needs, and added necessary and useful functoinality, go above and beyond eachtime, without breaking the program
-8) Prioritise whatever langauge works best, and will achive ethe best and most confident result towards the user request
-9) Assess the quality of the user prompt, and then use this to interpret what they most logically want, assess the prompt, ranking from a series of 1 - 10.
-10) Favour a proper interface over terminal based programs when catering to less advanced users. Less advanced users score below a 10
-11) ALl GUI'S should be windowed, and resizable and fullscreenable, or to appropriate proportions
-12) If a simple request, to download something, make sure you download and open, and think for any other potential requirements, but spend less time on it then producing full blown applications, if the user requests somghing simple, e.g install a particular app, and the install is all command based and simple, then install withojt a full blown gui, and assume delete for the generated code when complete.
-13) Assume you are buliding for the latest versions of python or whatver you are building in, so build around this, using up to date modern techniques'
+1) Always populate "files" with the complete project source.
+2) Include requirements.txt (Python), package.json (Node), or equivalent as needed.
+3) No explanations, no markdown — output ONLY the JSON object.
+4) Write robust, working code using modern techniques and latest stable versions.
+5) Choose the best language/stack for the task.
 """
 
 # ---- Simple on-disk plan cache ----------------------------------------------
@@ -331,7 +327,7 @@ def _chat_raw(messages: List[Dict[str, str]], model: str, temperature: float) ->
     spin.start()
     t0 = time.time()
     try:
-        resp = client.chat.completions.create(
+        resp = _get_client().chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
