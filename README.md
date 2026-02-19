@@ -1,105 +1,191 @@
+```
+ ██████╗ ██████╗  ██████╗██╗  ██╗███████╗███████╗████████╗██████╗  █████╗ ████████╗ ██████╗ ██████╗
+██╔═══██╗██╔══██╗██╔════╝██║  ██║██╔════╝██╔════╝╚══██╔══╝██╔══██╗██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗
+██║   ██║██████╔╝██║     ███████║█████╗  ███████╗   ██║   ██████╔╝███████║   ██║   ██║   ██║██████╔╝
+██║   ██║██╔══██╗██║     ██╔══██║██╔══╝  ╚════██║   ██║   ██╔══██╗██╔══██║   ██║   ██║   ██║██╔══██╗
+╚██████╔╝██║  ██║╚██████╗██║  ██║███████╗███████║   ██║   ██║  ██║██║  ██║   ██║   ╚██████╔╝██║  ██║
+ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝
+
+ ████████╗ ██████╗  ██████╗ ██╗     ██╗  ██╗██╗████████╗
+ ╚══██╔══╝██╔═══██╗██╔═══██╗██║     ██║ ██╔╝██║╚══██╔══╝
+    ██║   ██║   ██║██║   ██║██║     █████╔╝ ██║   ██║
+    ██║   ██║   ██║██║   ██║██║     ██╔═██╗ ██║   ██║
+    ██║   ╚██████╔╝╚██████╔╝███████╗██║  ██╗██║   ██║
+    ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝   ╚═╝
+```
+
 # Orchestrator Toolkit
 
-Lean middleware for AI coding agents. Sits between AI tools (Claude Code, OpenAI
-Codex, Cursor, etc.) and the machine — handling plan execution, multi-stack
-building, and plugin-based extensibility.
+The execution layer that sits in the middle between AI coding agents and your machine.
 
-The AI agents handle reasoning; this handles execution.
+Claude Code, Codex, Cursor — they can all *generate* code. But generating code
+and actually getting it built, running, and deployed on a real machine with the
+right dependencies, the right stack tooling, and proper audit trails? That's a
+different problem. This is the thing that solves it.
 
-## What it does
+## The idea
 
-- Accepts structured plans (JSON with files, deps, and run commands)
-- Detects stack: Python, Node.js, Go, Rust, Java, C++
-- Installs dependencies and builds automatically
-- Creates run scripts and executes projects
-- Plugin system for audit, policy, and integrations (e.g. Patchwork/codex-audit)
+AI agents are great at reasoning about code. They're bad at the messy stuff:
+figuring out which package manager you're using, creating a venv, detecting that
+your Vite config references a plugin that isn't in package.json, or making sure
+a Go project actually compiles before handing it back to you.
 
-## Quick start
+Orchestrator Toolkit is a thin execution middleware that any AI agent can call.
+Hand it a structured plan (JSON describing files, dependencies, and a run
+command) and it handles the rest — stack detection, dependency installation,
+building, launcher creation, and running. It also has a plugin system so you can
+bolt on things like audit logging, policy enforcement, or custom build steps.
 
-```bash
-git clone https://github.com/JonoGitty/orchestrator-toolkit.git
-cd orchestrator-toolkit
-pip install -r requirements.txt
+## What it actually does
+
+**Takes a plan, builds it, runs it.** That's the core loop.
+
+A "plan" is a JSON object describing a project:
+
+```json
+{
+  "name": "my-api",
+  "files": [
+    { "filename": "app.py", "code": "from fastapi import FastAPI\n..." },
+    { "filename": "requirements.txt", "code": "fastapi\nuvicorn" }
+  ],
+  "run": "uvicorn app:app --reload"
+}
 ```
 
-## Usage
+The orchestrator then:
 
-### Generate a project from a prompt
+1. **Writes the files** to disk in an isolated project directory
+2. **Detects the stack** from file contents (Python? Node? Go? Rust? Java? C++?)
+3. **Installs dependencies** using the right tool (pip in a venv, npm/yarn/pnpm,
+   go mod tidy, cargo build, gradle, maven — it figures it out)
+4. **Creates a launcher** (`run.sh`) so the project is immediately runnable
+5. **Runs it** if you want
 
-```bash
-python orchestrator.py generate "build a FastAPI todo API"
-```
+It handles edge cases like:
+- Poetry/PDM projects vs plain requirements.txt
+- Vite configs that reference plugins not listed in package.json
+- Go and Rust compilation with proper binary output
+- Java projects across Gradle, Maven, and plain javac
+- CMake and raw g++ builds for C++
 
-### Execute a pre-built plan
+## How to use it
 
-```bash
-python orchestrator.py execute plan.json
-```
-
-### Run an already-built project
-
-```bash
-python orchestrator.py run output/my-project
-```
-
-### List loaded plugins
+### From the CLI
 
 ```bash
+# Generate a project from a prompt (calls an LLM to create the plan)
+python orchestrator.py generate "build a FastAPI todo API with SQLite"
+
+# Execute a plan you already have
+python orchestrator.py execute plan.json -o ./my-output
+
+# Run an already-built project
+python orchestrator.py run output/my-api
+
+# See what plugins are loaded
 python orchestrator.py plugins
 ```
 
-## Programmatic API
+### From Python (as a library)
+
+This is designed to be called programmatically by other tools:
 
 ```python
-from orchestrator import generate_plan, execute_plan
+from orchestrator import generate_plan, execute_plan, run_project
 from plugins import PluginManager
+from pathlib import Path
 
+# Set up plugins (auto-discovers from plugins/ directory)
 plugins = PluginManager()
 plugins.discover()
 
-plan = generate_plan("build a CLI calculator")
+# Option A: Generate from a prompt via LLM
+plan = generate_plan("build a CLI calculator in Rust")
 result = execute_plan(plan, plugins=plugins)
-print(result["project_dir"], result["stack"], result["run_cmd"])
+
+# Option B: Pass in your own plan directly
+plan = {
+    "name": "hello-world",
+    "files": [{"filename": "main.py", "code": "print('hello')"}],
+    "run": "python main.py"
+}
+result = execute_plan(plan, output_dir=Path("./builds"), plugins=plugins)
+
+# Result contains everything you need
+print(result["project_dir"])  # where the project lives
+print(result["stack"])        # "python", "node", "go", etc.
+print(result["run_cmd"])      # the resolved run command
+
+# Run it
+run_project(Path(result["project_dir"]))
 ```
 
-## Plugin system
+## Plugins
 
-Plugins are Python modules in `plugins/` that expose a `register(manager)` function.
-Hook into the orchestration lifecycle:
+Plugins hook into the execution lifecycle. Drop a `.py` file in `plugins/` with
+a `register()` function and it auto-loads.
 
-| Hook | When | Can modify |
-|------|------|------------|
-| `pre_execute` | Before plan is applied | plan (return modified) |
-| `post_execute` | After plan is applied | — |
-| `pre_run` | Before running a project | — |
-| `post_run` | After running a project | — |
+Four hooks are available:
 
-Example plugin (`plugins/my_plugin.py`):
+| Hook | Fires when | What it can do |
+|------|-----------|---------------|
+| `pre_execute` | Before files are written and deps installed | Inspect or modify the plan. Return a modified plan or raise to block. |
+| `post_execute` | After the project is fully built | Log results, trigger notifications, run extra validation. |
+| `pre_run` | Before a project is executed | Gate execution, set up environment. |
+| `post_run` | After a project finishes running | Capture results, clean up. |
+
+### Writing a plugin
 
 ```python
-PLUGIN_NAME = "my-plugin"
-PLUGIN_DESCRIPTION = "Logs every execution"
+# plugins/my_logger.py
+PLUGIN_NAME = "my-logger"
+PLUGIN_DESCRIPTION = "Logs every plan execution to a file"
 
 def on_pre_execute(plan, **kwargs):
-    print(f"Executing: {plan['name']}")
-    return plan
+    print(f"[my-logger] Building: {plan['name']} ({len(plan.get('files', []))} files)")
+    return plan  # return modified plan, or None to leave it unchanged
+
+def on_post_execute(plan, result, **kwargs):
+    print(f"[my-logger] Built at: {result['project_dir']} (stack: {result['stack']})")
 
 def register(manager):
     manager.add_hook("pre_execute", on_pre_execute)
+    manager.add_hook("post_execute", on_post_execute)
 ```
 
-### Patchwork (codex-audit) plugin
+### Built-in: Patchwork (codex-audit) plugin
 
-Built-in integration with [codex-audit](https://github.com/JonoGitty/codex-audit)
-for audit trails and policy enforcement. Install Patchwork and it auto-activates:
+Ships with an integration for [Patchwork](https://github.com/JonoGitty/codex-audit),
+a local-first audit trail system for AI coding agents. When the `patchwork-audit`
+CLI is installed on your machine, this plugin auto-activates and:
+
+- **Logs every plan execution** as a tamper-evident audit event
+- **Evaluates plans against YAML policies** before execution — can block actions
+  that violate your rules (e.g., writing to sensitive files, running dangerous commands)
 
 ```bash
+# Install Patchwork and the plugin activates automatically
 npm install -g patchwork-audit
 ```
 
+No configuration needed. If Patchwork isn't installed, the plugin silently
+disables itself.
+
+## Supported stacks
+
+| Stack | Detection | Dependency install | Build |
+|-------|-----------|-------------------|-------|
+| Python | `*.py`, `requirements.txt`, `pyproject.toml` | pip (venv), Poetry, PDM | — |
+| Node.js | `package.json`, `*.js`/`*.ts`/`*.tsx` | npm, yarn, pnpm + Vite plugin detection | — |
+| Go | `go.mod`, `*.go` | go mod tidy | go build |
+| Rust | `Cargo.toml` | — | cargo build --release |
+| Java | `build.gradle`, `pom.xml`, `*.java` | Gradle, Maven | javac / jar |
+| C++ | `CMakeLists.txt`, `*.cpp`/`*.cc` | — | cmake + make, or g++ |
+
 ## Configuration
 
-User config: `~/.config/orchestrator-toolkit/config.json`
+`~/.config/orchestrator-toolkit/config.json`
 
 ```json
 {
@@ -121,23 +207,57 @@ User config: `~/.config/orchestrator-toolkit/config.json`
 }
 ```
 
-## API key setup
+### API key
 
-For LLM plan generation (first match wins):
-1. Local file: `cloud_agent/apikey.txt`
-2. Environment variable: `OPENAI_API_KEY`
+The `generate` command needs an LLM API key. First match wins:
+
+1. `cloud_agent/apikey.txt`
+2. `OPENAI_API_KEY` environment variable
 3. System keyring
-4. Config file: `~/.config/orchestrator-toolkit/openai_api_key`
+4. `~/.config/orchestrator-toolkit/openai_api_key`
+
+If you're only using `execute` (passing in pre-built plans), no API key is needed.
+
+## Setup
+
+```bash
+git clone https://github.com/JonoGitty/orchestrator-toolkit.git
+cd orchestrator-toolkit
+pip install -r requirements.txt
+```
+
+Or run the setup script which creates a venv for you:
+
+```bash
+python setup.py
+```
+
+## Project structure
+
+```
+orchestrator.py          Core API: generate_plan(), execute_plan(), run_project()
+config.py                Configuration management
+cloud_agent/
+  cloud_client.py        LLM integration (plan generation, caching, retry)
+runtime/
+  plan_runner.py         Stack detection, dependency install, building
+plugins/
+  __init__.py            Plugin system (PluginManager, hook lifecycle)
+  patchwork_audit.py     Patchwork/codex-audit integration
+utils/
+  runner.py              Command execution with JSONL logging
+  helper.py              Slugify, safe path joining, run script creation
+  backup.py              Project backup snapshots
+tests/
+  test_orchestrator.py   Unit tests (config, plan parsing, plugins)
+  test_integration_minimal.py  Integration test (full plan -> build)
+```
 
 ## Testing
 
 ```bash
 python -m pytest tests/ -v
 ```
-
-## Supported stacks
-
-Python (venv/poetry/pdm), Node.js (npm/yarn/pnpm), Go, Rust, Java (Gradle/Maven), C++
 
 ## Changelog
 
