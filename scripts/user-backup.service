@@ -1,0 +1,7 @@
+[Unit]
+Description=AI Orchestrator nightly backup
+
+[Service]
+Type=oneshot
+ExecStart=/home/jonog/ai_orchestrator/scripts/backup_now.py
+WorkingDirectory=/home/jonog/ai_orchestrator

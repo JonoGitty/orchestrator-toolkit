@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env
+.env/
+.venv/
+
+# Orchestrator output / logs
+RUNNING/
+SAVED/
+logs/
+task_logs/
+
+# Local state / data
+*.db
+*.log
+system_state.json
+webpage.json
+website_data.json
+context_log.py.save
+api_key.txt
+mkdir p config ai orchestrator.txt
+cloud_agent/apikey.txt
+runtime/command_log.jsonl
+BACKUP/
+A bunch of launch stuff.txt
+
+
+# OS / filesystem junk
+.DS_Store
+System Volume Information/
+*.swp
+*.tar.gz
+Thumbs.db

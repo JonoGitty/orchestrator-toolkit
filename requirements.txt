@@ -1,0 +1,23 @@
+# Mandatory — orchestrator itself
+openai>=1.0.0
+
+# Optional / Recommended — only if you want the orchestrator
+# to be able to immediately RUN projects that use these frameworks.
+# These are NOT required for the orchestrator itself.
+PyQt5
+PySide6
+gradio
+streamlit
+fastapi
+uvicorn
+flask
+requests
+
+# Optional integrations
+caldav>=0.9.0
+icalendar>=5.0.0
+
+# Development dependencies
+pytest>=7.0.0
+keyring>=23.0.0
+rich>=13.0.0

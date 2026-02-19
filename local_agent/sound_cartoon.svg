@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="800" viewBox="0 0 1200 800">
+
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#f8fafc"/>
+    <stop offset="100%" stop-color="#eef2ff"/>
+  </linearGradient>
+</defs>
+<rect x="0" y="0" width="1200" height="800" rx="0" ry="0" fill="url(#bg)" stroke="none" stroke-width="0" />
+<rect x="14" y="14" width="1172" height="772" rx="22" ry="22" fill="none" stroke="#111827" stroke-width="4" />
+<text x="600.0" y="70" fill="#0f172a" font-family="sans-serif" font-size="36" font-weight="800" text-anchor="middle" >The Sound-Savvy Computer</text>
+<g >
+<rect x="272.0" y="656.0" width="96.0" height="16.8" rx="8.4" ry="8.4" fill="#cbd5e1" stroke="#334155" stroke-width="3" />
+<rect x="314.0" y="596.0" width="12.0" height="66.0" rx="4.8" ry="4.8" fill="#cbd5e1" stroke="#334155" stroke-width="3" />
+<rect x="140" y="380" width="360.0" height="240.0" rx="19.2" ry="19.2" fill="#0ea5e9" stroke="#0c4a6e" stroke-width="4" />
+<rect x="156.8" y="396.8" width="326.4" height="206.4" rx="12.0" ry="12.0" fill="#e0f2fe" stroke="#0c4a6e" stroke-width="3" />
+<circle cx="260.0" cy="482.0" r="8" fill="#0c4a6e" />
+<circle cx="380.0" cy="482.0" r="8" fill="#0c4a6e" />
+<path d="M 272.0 536.0 Q 320.0 566.0, 368.0 536.0" fill="none" stroke="#0c4a6e" stroke-width="5" stroke-linecap="round"/>
+<circle cx="483.2" cy="416.0" r="3" fill="#0c4a6e" />
+<circle cx="483.2" cy="435.2" r="3" fill="#0c4a6e" />
+<circle cx="483.2" cy="454.4" r="3" fill="#0c4a6e" />
+<circle cx="483.2" cy="473.6" r="3" fill="#0c4a6e" />
+<circle cx="483.2" cy="492.8" r="3" fill="#0c4a6e" />
+</g>
+<g >
+<circle cx="950" cy="420" r="22" fill="#fde68a" stroke="#78350f" stroke-width="3"/>
+<line x1="950" y1="446.4" x2="950" y2="534.0" stroke="#334155" stroke-width="5"/>
+<line x1="902.0" y1="486.0" x2="998.0" y2="486.0" stroke="#334155" stroke-width="5"/>
+<line x1="950" y1="534.0" x2="908.0" y2="588.0" stroke="#334155" stroke-width="5"/>
+<line x1="950" y1="534.0" x2="992.0" y2="588.0" stroke="#334155" stroke-width="5"/>
+<path d="M 971.6 417.6 q 10 6 0 16" fill="none" stroke="#b45309" stroke-width="3" stroke-linecap="round"/>
+</g>
+<g opacity="0.85">
+<g >
+<circle cx="480" cy="430" r="8" fill="#3b82f6" />
+<rect x="484.0" y="406.0" width="5" height="30" fill="#3b82f6" />
+<circle cx="504.0" cy="426.0" r="8" fill="#3b82f6" />
+<rect x="508.0" y="386.0" width="5" height="50" fill="#3b82f6" />
+<path d="M 488.0 406.0 L 512.0 386.0" stroke="#3b82f6" stroke-width="5"/>
+</g>
+</g>
+<g opacity="0.85">
+<g >
+<circle cx="540" cy="390" r="8" fill="#22c55e" />
+<rect x="544.0" y="366.0" width="5" height="30" fill="#22c55e" />
+<circle cx="564.0" cy="386.0" r="8" fill="#22c55e" />
+<rect x="568.0" y="346.0" width="5" height="50" fill="#22c55e" />
+<path d="M 548.0 366.0 L 572.0 346.0" stroke="#22c55e" stroke-width="5"/>
+</g>
+</g>
+<g opacity="0.85">
+<g >
+<circle cx="600" cy="420" r="8" fill="#f59e0b" />
+<rect x="604.0" y="396.0" width="5" height="30" fill="#f59e0b" />
+<circle cx="624.0" cy="416.0" r="8" fill="#f59e0b" />
+<rect x="628.0" y="376.0" width="5" height="50" fill="#f59e0b" />
+<path d="M 608.0 396.0 L 632.0 376.0" stroke="#f59e0b" stroke-width="5"/>
+</g>
+</g>
+<g opacity="0.85">
+<g >
+<circle cx="660" cy="380" r="8" fill="#ef4444" />
+<rect x="664.0" y="356.0" width="5" height="30" fill="#ef4444" />
+<circle cx="684.0" cy="376.0" r="8" fill="#ef4444" />
+<rect x="688.0" y="336.0" width="5" height="50" fill="#ef4444" />
+<path d="M 668.0 356.0 L 692.0 336.0" stroke="#ef4444" stroke-width="5"/>
+</g>
+</g>
+<g opacity="0.85">
+<g >
+<circle cx="720" cy="410" r="8" fill="#8b5cf6" />
+<rect x="724.0" y="386.0" width="5" height="30" fill="#8b5cf6" />
+<circle cx="744.0" cy="406.0" r="8" fill="#8b5cf6" />
+<rect x="748.0" y="366.0" width="5" height="50" fill="#8b5cf6" />
+<path d="M 728.0 386.0 L 752.0 366.0" stroke="#8b5cf6" stroke-width="5"/>
+</g>
+</g>
+<g >
+<rect x="330" y="120" width="600" height="300" rx="26" ry="26" fill="#ffffff" stroke="#222" stroke-width="3" />
+<polygon points="330,420 390,420 350,420" fill="#ffffff" stroke="#222" stroke-width="3" />
+</g>
+<text x="354" y="168" fill="#111827" font-family="sans-serif" font-size="26" font-weight="700" text-anchor="start" >Amazing things I can do with</text>
+<text x="354" y="204" fill="#2563eb" font-family="sans-serif" font-size="34" font-weight="900" text-anchor="start" >S O U N D !</text>
+<g >
+<circle cx="390.0" cy="240" r="8" fill="#3b82f6" />
+<rect x="395.0" y="210.0" width="5" height="30" fill="#3b82f6" />
+<circle cx="420.0" cy="235.0" r="8" fill="#3b82f6" />
+<rect x="425.0" y="185.0" width="5" height="50" fill="#3b82f6" />
+<path d="M 400.0 210.0 L 430.0 185.0" stroke="#3b82f6" stroke-width="5"/>
+</g>
+<text x="390.0" y="280" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Music playback</text>
+<g >
+<rect x="498.0" y="204.0" width="24" height="36" rx="12" fill="#0ea5e9" stroke="#0c4a6e" stroke-width="3"/>
+<path d="M 486.0 228.0 q 24 24 48 0" fill="none" stroke="#0c4a6e" stroke-width="3"/>
+<rect x="506.0" y="228.0" width="8" height="24" fill="#0c4a6e"/>
+<rect x="492.0" y="252.0" width="36" height="6" rx="3" fill="#0c4a6e"/>
+</g>
+<text x="510.0" y="280" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Speech to text</text>
+<g >
+<polygon points="612.0,218.0 638.0,228.0 638.0,252.0 612.0,262.0" fill="#10b981" stroke="#064e3b" stroke-width="3"/>
+<path d="M 648.0 240 a 10.0 10.0 0 0 0 0 -0.1" stroke="#065f46" stroke-width="3" fill="none"/>
+<path d="M 658.0 240 a 20.0 20.0 0 0 0 0 -0.1" stroke="#065f46" stroke-width="3" fill="none"/>
+<path d="M 668.0 240 a 30.0 30.0 0 0 0 0 -0.1" stroke="#065f46" stroke-width="3" fill="none"/>
+</g>
+<text x="630.0" y="280" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Text to speech</text>
+<g >
+<polyline points="720.0,242.0 723.75,246.59220118838107 727.5,250.48528137423858 731.25,253.08655439013543 735.0,254.0 738.75,253.08655439013543 742.5,250.48528137423858 746.25,246.59220118838107 750.0,242.0 753.75,237.40779881161893 757.5,233.51471862576142 761.25,230.91344560986457 765.0,230.0 768.75,230.91344560986457 772.5,233.51471862576142 776.25,237.4077988116189 780.0,242.0" fill="none" stroke="#8b5cf6" stroke-width="3" stroke-linecap="round"/>
+<line x1="714.0" y1="220" x2="786.0" y2="260" stroke="#9333ea" stroke-width="4"/>
+<line x1="786.0" y1="220" x2="714.0" y2="260" stroke="#9333ea" stroke-width="4"/>
+</g>
+<text x="750.0" y="280" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Noise cancel</text>
+<g >
+<rect x="850.0" y="246.0" width="8" height="10.0" fill="#f59e0b" stroke="#92400e" stroke-width="2"/>
+<rect x="860.0" y="234.0" width="8" height="22.0" fill="#f59e0b" stroke="#92400e" stroke-width="2"/>
+<rect x="870.0" y="240.0" width="8" height="16.0" fill="#f59e0b" stroke="#92400e" stroke-width="2"/>
+<rect x="880.0" y="228.0" width="8" height="28.0" fill="#f59e0b" stroke="#92400e" stroke-width="2"/>
+<rect x="890.0" y="238.0" width="8" height="18.0" fill="#f59e0b" stroke="#92400e" stroke-width="2"/>
+</g>
+<text x="870.0" y="280" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Podcast mixing</text>
+<g >
+<circle cx="390.0" cy="340" r="10.0" fill="none" stroke="#14b8a6" stroke-width="3" opacity="0.7"/>
+<circle cx="390.0" cy="340" r="20.0" fill="none" stroke="#14b8a6" stroke-width="3" opacity="0.5"/>
+<circle cx="390.0" cy="340" r="30.0" fill="none" stroke="#14b8a6" stroke-width="3" opacity="0.29999999999999993"/>
+<circle cx="390.0" cy="340" r="3" fill="#14b8a6"/>
+</g>
+<text x="390.0" y="380" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Spatial audio</text>
+<polygon points="510.0,324.0 514.1144967660473,334.3368810393754 525.2169042607225,335.05572809000085 516.6573956140661,342.1631189606246 519.4045640366795,352.94427190999915 510.0,347.0 500.5954359633204,352.94427190999915 503.34260438593395,342.1631189606246 494.78309573927754,335.05572809000085 505.8855032339527,334.3368810393754" fill="#ef4444" stroke="#7f1d1d" stroke-width="2"/>
+<text x="510.0" y="380" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Fun FX</text>
+<g >
+<g >
+<rect x="618.0" y="304.0" width="24" height="36" rx="12" fill="#0ea5e9" stroke="#0c4a6e" stroke-width="3"/>
+<path d="M 606.0 328.0 q 24 24 48 0" fill="none" stroke="#0c4a6e" stroke-width="3"/>
+<rect x="626.0" y="328.0" width="8" height="24" fill="#0c4a6e"/>
+<rect x="612.0" y="352.0" width="36" height="6" rx="3" fill="#0c4a6e"/>
+</g>
+<polygon points="656.0,306.8 658.8801477362331,314.03581672756275 666.6518329825058,314.53900966300057 660.6601769298462,319.51418327243726 662.5831948256757,327.0609903369994 656.0,322.9 649.4168051743243,327.0609903369994 651.3398230701538,319.51418327243726 645.3481670174942,314.53900966300057 653.1198522637669,314.03581672756275" fill="#22c55e" stroke="#7f1d1d" stroke-width="2"/>
+</g>
+<text x="630.0" y="380" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Voice assistant</text>
+<polyline points="720.0,340 735.0,340 742.0,328.0 750.0,350.0 758.0,322.0 766.0,340 780.0,340" fill="none" stroke="#ef4444" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="750.0" y="380" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Beat detect</text>
+<g >
+<rect x="824.0" y="312.0" width="60.0" height="36.0" rx="10.0" ry="10.0" fill="#eef2ff" stroke="#312e81" stroke-width="3" />
+<circle cx="872.0" cy="350.0" r="6" fill="#eef2ff" stroke="#312e81" stroke-width="3"/>
+<rect x="890.0" y="320.0" width="50.0" height="30.0" rx="10.0" ry="10.0" fill="#e0e7ff" stroke="#312e81" stroke-width="3" />
+</g>
+<text x="870.0" y="380" fill="#334155" font-family="sans-serif" font-size="14" font-weight="600" text-anchor="middle" >Translate talk</text>
+<text x="200" y="610" fill="#0c4a6e" font-family="sans-serif" font-size="18" font-weight="700" text-anchor="start" >Let me show you!</text>
+</svg>
