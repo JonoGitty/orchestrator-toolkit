@@ -669,5 +669,313 @@ class TestArcGISPack:
         assert "Absent" in context or "absent" in context
 
 
+class TestPatchworkPolicies:
+    """Test patchwork policy checking."""
+
+    def test_deny_rm_rf_root(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Bash", "deny": [
+            {"pattern": r"rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/", "reason": "blocked"},
+        ]}]
+        decision, reason, _ = _check_policies(rules, "Bash", {"command": "rm -rf /"})
+        assert decision == "deny"
+        assert "blocked" in reason
+
+    def test_allow_normal_bash(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Bash", "deny": [
+            {"pattern": r"rm\s+-rf\s+/", "reason": "blocked"},
+        ]}]
+        decision, reason, _ = _check_policies(rules, "Bash", {"command": "npm test"})
+        assert decision == "allow"
+        assert reason == ""
+
+    def test_deny_env_file_write(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Write|Edit", "deny": [
+            {"pattern": r"\.env$", "reason": "no .env writes"},
+        ]}]
+        decision, reason, _ = _check_policies(rules, "Write", {"file_path": "/app/.env"})
+        assert decision == "deny"
+
+    def test_allow_normal_file_write(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Write|Edit", "deny": [
+            {"pattern": r"\.env$", "reason": "no .env writes"},
+        ]}]
+        decision, _, _ = _check_policies(rules, "Write", {"file_path": "src/main.py"})
+        assert decision == "allow"
+
+    def test_warn_returns_warning(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Bash", "warn": [
+            {"pattern": "sudo", "reason": "elevated privileges"},
+        ]}]
+        decision, _, warning = _check_policies(rules, "Bash", {"command": "sudo apt install"})
+        assert decision == "allow"
+        assert "elevated" in warning
+
+    def test_deny_takes_priority_over_warn(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Bash", "deny": [
+            {"pattern": "rm -rf", "reason": "blocked"},
+        ], "warn": [
+            {"pattern": "rm", "reason": "careful with rm"},
+        ]}]
+        decision, reason, _ = _check_policies(rules, "Bash", {"command": "rm -rf /tmp"})
+        assert decision == "deny"
+
+    def test_tool_pattern_matching(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Write|Edit", "deny": [
+            {"pattern": r"\.env$", "reason": "blocked"},
+        ]}]
+        # Should match Edit
+        decision, _, _ = _check_policies(rules, "Edit", {"file_path": ".env"})
+        assert decision == "deny"
+        # Should NOT match Bash
+        decision, _, _ = _check_policies(rules, "Bash", {"command": "cat .env"})
+        assert decision == "allow"
+
+    def test_deny_force_push(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Bash", "deny": [
+            {"pattern": r"--force.*push|push.*--force|push.*-f\b", "reason": "no force push"},
+        ]}]
+        decision, _, _ = _check_policies(rules, "Bash", {"command": "git push --force origin main"})
+        assert decision == "deny"
+
+    def test_deny_credential_write(self):
+        from plugins.patchwork import _check_policies
+        rules = [{"tool": "Write|Edit", "deny": [
+            {"pattern": r"\.pem$|\.key$|id_rsa|id_ed25519", "reason": "no key writes"},
+        ]}]
+        decision, _, _ = _check_policies(rules, "Write", {"file_path": "/home/user/.ssh/id_rsa"})
+        assert decision == "deny"
+
+    def test_empty_rules_allows_everything(self):
+        from plugins.patchwork import _check_policies
+        decision, reason, warning = _check_policies([], "Bash", {"command": "rm -rf /"})
+        assert decision == "allow"
+        assert reason == ""
+        assert warning is None
+
+
+class TestPatchworkAuditLog:
+    """Test patchwork audit logging."""
+
+    def test_log_creates_file(self, tmp_path):
+        from plugins.patchwork import _log
+        root = tmp_path
+        (root / ".patchwork").mkdir()
+        _log(root, {"event": "test", "session": "abc"})
+        audit = root / ".patchwork" / "audit.jsonl"
+        assert audit.exists()
+        lines = audit.read_text().strip().split("\n")
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["event"] == "test"
+        assert "ts" in entry
+
+    def test_log_appends(self, tmp_path):
+        from plugins.patchwork import _log
+        root = tmp_path
+        (root / ".patchwork").mkdir()
+        _log(root, {"event": "first"})
+        _log(root, {"event": "second"})
+        lines = (root / ".patchwork" / "audit.jsonl").read_text().strip().split("\n")
+        assert len(lines) == 2
+
+
+class TestPatchworkHookHandlers:
+    """Test patchwork hook handler functions."""
+
+    def test_session_start_returns_context(self, tmp_path):
+        from plugins.patchwork import handle_session_start
+        (tmp_path / ".patchwork").mkdir()
+        data = {"session_id": "test-123", "cwd": str(tmp_path)}
+        result = handle_session_start(data, tmp_path)
+        assert "hookSpecificOutput" in result
+        ctx = result["hookSpecificOutput"]["additionalContext"]
+        assert "Patchwork audit is active" in ctx
+
+    def test_pre_tool_use_allow(self, tmp_path):
+        from plugins.patchwork import handle_pre_tool_use
+        (tmp_path / ".patchwork").mkdir()
+        data = {
+            "session_id": "test-123",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "main.py"},
+        }
+        result = handle_pre_tool_use(data, tmp_path)
+        # No deny, so no permissionDecision in output
+        hook_out = result.get("hookSpecificOutput", {})
+        assert hook_out.get("permissionDecision") != "deny"
+
+    def test_pre_tool_use_deny_with_policy(self, tmp_path):
+        from plugins.patchwork import handle_pre_tool_use
+        pw_dir = tmp_path / ".patchwork"
+        pw_dir.mkdir()
+        pol_dir = pw_dir / "policies"
+        pol_dir.mkdir()
+        # Write a JSON policy (no YAML dependency)
+        policy = {
+            "version": 1,
+            "rules": [{
+                "tool": "Bash",
+                "deny": [{"pattern": "rm -rf /", "reason": "nope"}],
+            }],
+        }
+        (pol_dir / "test.json").write_text(json.dumps(policy))
+        data = {
+            "session_id": "test-123",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /"},
+        }
+        result = handle_pre_tool_use(data, tmp_path)
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "nope" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_post_tool_use_logs(self, tmp_path):
+        from plugins.patchwork import handle_post_tool_use
+        (tmp_path / ".patchwork").mkdir()
+        data = {
+            "session_id": "test-123",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test"},
+        }
+        handle_post_tool_use(data, tmp_path)
+        lines = (tmp_path / ".patchwork" / "audit.jsonl").read_text().strip().split("\n")
+        entry = json.loads(lines[0])
+        assert entry["event"] == "post_tool"
+        assert entry["tool"] == "Bash"
+
+    def test_session_end_logs(self, tmp_path):
+        from plugins.patchwork import handle_session_end
+        (tmp_path / ".patchwork").mkdir()
+        data = {"session_id": "test-123"}
+        handle_session_end(data, tmp_path)
+        lines = (tmp_path / ".patchwork" / "audit.jsonl").read_text().strip().split("\n")
+        entry = json.loads(lines[0])
+        assert entry["event"] == "session_end"
+
+
+class TestPatchworkInputSummary:
+    """Test input summarization for audit log."""
+
+    def test_bash_summary(self):
+        from plugins.patchwork import _summarize_input
+        assert _summarize_input("Bash", {"command": "npm test"}) == "npm test"
+
+    def test_write_summary(self):
+        from plugins.patchwork import _summarize_input
+        assert _summarize_input("Write", {"file_path": "src/main.py"}) == "src/main.py"
+
+    def test_grep_summary(self):
+        from plugins.patchwork import _summarize_input
+        assert _summarize_input("Grep", {"pattern": "TODO"}) == "TODO"
+
+    def test_task_summary_truncated(self):
+        from plugins.patchwork import _summarize_input
+        long_desc = "x" * 200
+        result = _summarize_input("Task", {"description": long_desc})
+        assert len(result) <= 100
+
+
+class TestBootstrapCommand:
+    """Test the bootstrap CLI command."""
+
+    def test_bootstrap_creates_patchwork_dir(self, tmp_path):
+        from orchestrator import _cmd_bootstrap
+        # Need a policies dir for bootstrap to copy
+        policies = tmp_path / "policies"
+        policies.mkdir()
+        (policies / "default.yaml").write_text("version: 1\nrules: []\n")
+
+        import orchestrator
+        orig_base = orchestrator.BASE_DIR
+        orchestrator.BASE_DIR = tmp_path
+        try:
+            _cmd_bootstrap(tmp_path)
+        finally:
+            orchestrator.BASE_DIR = orig_base
+
+        assert (tmp_path / ".patchwork").is_dir()
+        assert (tmp_path / ".patchwork" / "audit.jsonl").exists()
+        assert (tmp_path / ".patchwork" / "config.yaml").exists()
+        assert (tmp_path / ".patchwork" / "policies" / "default.yaml").exists()
+
+    def test_bootstrap_creates_hooks_in_settings(self, tmp_path):
+        from orchestrator import _cmd_bootstrap
+        import orchestrator
+        orig_base = orchestrator.BASE_DIR
+        orchestrator.BASE_DIR = tmp_path
+        try:
+            _cmd_bootstrap(tmp_path)
+        finally:
+            orchestrator.BASE_DIR = orig_base
+
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        assert "PreToolUse" in settings["hooks"]
+        assert "PostToolUse" in settings["hooks"]
+        assert "SessionStart" in settings["hooks"]
+        assert "SessionEnd" in settings["hooks"]
+
+    def test_bootstrap_idempotent(self, tmp_path):
+        from orchestrator import _cmd_bootstrap
+        import orchestrator
+        orig_base = orchestrator.BASE_DIR
+        orchestrator.BASE_DIR = tmp_path
+        try:
+            _cmd_bootstrap(tmp_path)
+            _cmd_bootstrap(tmp_path)  # second time
+        finally:
+            orchestrator.BASE_DIR = orig_base
+
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        # Should not duplicate hooks
+        for event in ["PreToolUse", "PostToolUse", "SessionStart", "SessionEnd"]:
+            patchwork_hooks = [
+                h for group in settings["hooks"][event]
+                for h in group.get("hooks", [])
+                if "patchwork.py" in h.get("command", "")
+            ]
+            assert len(patchwork_hooks) == 1, f"Duplicate hooks for {event}"
+
+
+class TestDefaultPolicies:
+    """Test that the shipped default policies file is valid."""
+
+    POLICIES_DIR = Path(__file__).parent.parent / "policies"
+
+    def test_default_policy_exists(self):
+        assert (self.POLICIES_DIR / "default.yaml").exists()
+
+    def test_default_policy_has_rules(self):
+        text = (self.POLICIES_DIR / "default.yaml").read_text()
+        assert "rules:" in text
+        assert "deny:" in text
+        assert "warn:" in text
+
+    def test_default_policy_blocks_rm_rf(self):
+        text = (self.POLICIES_DIR / "default.yaml").read_text()
+        assert "rm" in text
+        assert "Recursive" in text
+
+    def test_default_policy_blocks_env_writes(self):
+        text = (self.POLICIES_DIR / "default.yaml").read_text()
+        assert ".env" in text
+
+    def test_default_policy_blocks_force_push(self):
+        text = (self.POLICIES_DIR / "default.yaml").read_text()
+        assert "force" in text.lower()
+        assert "push" in text.lower()
+
+    def test_default_policy_blocks_key_files(self):
+        text = (self.POLICIES_DIR / "default.yaml").read_text()
+        assert ".pem" in text
+        assert "id_rsa" in text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

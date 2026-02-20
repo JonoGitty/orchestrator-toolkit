@@ -1,0 +1,78 @@
+# Patchwork default security policies
+# These rules are checked on every PreToolUse hook call.
+#
+# Each rule matches a tool name (regex) and has deny/warn patterns.
+# - deny: blocks the tool call, Claude sees the reason
+# - warn: allows but injects a warning into Claude's context
+#
+# Patterns are matched against the full tool_input JSON string,
+# so they catch commands, file paths, content — anything in the input.
+
+version: 1
+name: default
+description: Sensible defaults — block destructive ops, protect secrets
+
+rules:
+  # ── Bash: dangerous commands ──────────────────────────────────────
+  - tool: Bash
+    deny:
+      - pattern: 'rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/'
+        reason: "Recursive force-delete of root directory blocked"
+      - pattern: 'rm\s+-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\s+/'
+        reason: "Recursive force-delete of root directory blocked"
+      - pattern: 'mkfs\.'
+        reason: "Filesystem format command blocked"
+      - pattern: 'dd\s+.*of=/dev/'
+        reason: "Raw disk write blocked"
+      - pattern: '>\s*/dev/sd[a-z]'
+        reason: "Raw disk write blocked"
+      - pattern: 'DROP\s+(TABLE|DATABASE|SCHEMA)'
+        reason: "Database destructive operation blocked"
+      - pattern: 'TRUNCATE\s+TABLE'
+        reason: "Database truncate blocked"
+      - pattern: '--force.*push|push.*--force|push.*-f\b'
+        reason: "Force push blocked — use regular push"
+      - pattern: 'chmod\s+777'
+        reason: "World-writable permissions blocked — use specific permissions"
+      - pattern: 'curl\s+.*\|\s*(sudo\s+)?bash|wget\s+.*\|\s*(sudo\s+)?bash'
+        reason: "Piping remote script to shell blocked — download and review first"
+      - pattern: 'curl\s+.*\|\s*(sudo\s+)?sh|wget\s+.*\|\s*(sudo\s+)?sh'
+        reason: "Piping remote script to shell blocked — download and review first"
+
+    warn:
+      - pattern: 'sudo\s+'
+        reason: "Command uses sudo — elevated privileges"
+      - pattern: 'npm\s+publish|pip\s+upload|cargo\s+publish'
+        reason: "Publishing to a package registry — make sure this is intentional"
+      - pattern: 'git\s+reset\s+--hard'
+        reason: "Hard reset discards uncommitted work"
+      - pattern: 'git\s+clean\s+-[a-zA-Z]*f'
+        reason: "git clean -f deletes untracked files permanently"
+
+  # ── Write/Edit: protect sensitive files ───────────────────────────
+  - tool: Write|Edit
+    deny:
+      - pattern: '\.env$|\.env\.'
+        reason: "Writing to .env files blocked — secrets should not be AI-generated"
+      - pattern: 'credentials\.json|credentials\.yaml'
+        reason: "Writing to credential files blocked"
+      - pattern: 'apikey\.txt|api_key\.txt'
+        reason: "Writing to API key files blocked"
+      - pattern: '\.pem$|\.key$|id_rsa|id_ed25519'
+        reason: "Writing to private key files blocked"
+      - pattern: '\.claude/settings\.json'
+        reason: "Modifying Claude Code settings blocked — edit manually"
+
+    warn:
+      - pattern: 'package\.json|Cargo\.toml|go\.mod|pyproject\.toml'
+        reason: "Modifying dependency manifest — review version changes"
+      - pattern: '\.github/workflows/|\.gitlab-ci|Jenkinsfile|Dockerfile'
+        reason: "Modifying CI/CD or container config — review carefully"
+
+  # ── Read: warn on sensitive reads ─────────────────────────────────
+  - tool: Read
+    warn:
+      - pattern: '\.env$|\.env\.'
+        reason: "Reading .env file — contents may appear in audit log"
+      - pattern: '\.pem$|\.key$|id_rsa|id_ed25519'
+        reason: "Reading private key file"
