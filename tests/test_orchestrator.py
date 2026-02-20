@@ -638,6 +638,85 @@ class TestArcGISPack:
         assert '"constraints"' in context
         assert '"result"' in context
 
+    def test_context_has_desirable_criteria(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Desirable Criteria" in context
+        assert "calculate_proximity_scores" in context
+        assert "DESIRABLE_PROXIMITY" in context
+        assert "DIST_GREENSPACE" in context
+        assert "DIST_BUS" in context
+        assert "DIST_TRAIN" in context
+        assert "DIST_SCHOOL" in context
+        assert "DIST_GP" in context
+
+    def test_context_has_urban_adjacency(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "check_urban_adjacency" in context
+        assert "ADJACENT_URBAN" in context
+
+    def test_context_has_site_comparison(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "print_site_comparison_table" in context
+        assert "generate_site_comparison" in context
+        assert "DWELLINGS_EST" in context
+
+    def test_context_has_site_digitising(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "create_selected_sites" in context
+        assert "SITE_NAME" in context
+        assert "DWELLINGS_PER_HA" in context
+        assert "Manual digitising" in context or "manual digitising" in context
+
+    def test_context_has_custom_criteria_framework(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Custom Criteria" in context
+        assert "AONB" in context
+        assert "Green Belt" in context
+        assert "Ancient woodland" in context
+        assert "literature justification" in context.lower() or "Literature justification" in context
+
+    def test_context_has_report_sections(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Section A" in context
+        assert "Section B" in context
+        assert "Section C" in context
+        assert "Section D" in context
+        assert "Section E" in context
+        assert "Section F" in context
+
+    def test_context_has_harvard_references(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Harvard" in context
+        assert "NPPF" in context
+        assert "Malczewski" in context
+        assert "Watson" in context and "Hudson" in context
+        assert "generate_dataset_table" in context
+        assert "DATASETS_USED" in context
+
+    def test_context_has_flood_warning_vs_alert(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Flood Warning" in context
+        assert "Flood Alert" in context
+        assert "flood_warning_clip" in context
+        assert "flood_alert_clip" in context
+        assert "reclass_flood_warning" in context
+
+    def test_context_has_configurable_slope(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "SLOPE_THRESHOLD" in context
+        assert "30" in context  # housing threshold
+
+    def test_context_has_workspace_cleanup(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "cleanup_intermediate_layers" in context
+        assert "to_delete" in context
+        assert "to_keep" in context
+
+    def test_context_has_absent_criteria(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "identify_absent_criteria" in context
+        assert "Absent" in context or "absent" in context
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

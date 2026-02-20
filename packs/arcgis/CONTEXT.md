@@ -3984,8 +3984,14 @@ exclusion_rasters["rail"] = reclassify_exclusion(
     "rail_buffer_raster", "reclass_rail", "Rail buffers")
 exclusion_rasters["rivers"] = reclassify_exclusion(
     "rivers_buffer_raster", "reclass_rivers", "River buffers")
+exclusion_rasters["woodland"] = reclassify_exclusion(
+    "woodland_buffer_raster", "reclass_woodland", "Woodland buffers")
+exclusion_rasters["flood_z2"] = reclassify_exclusion(
+    "flood_zone_2_clip_raster", "reclass_flood2", "Flood Zone 2")
 exclusion_rasters["flood_z3"] = reclassify_exclusion(
     "flood_zone_3_clip_raster", "reclass_flood3", "Flood Zone 3")
+exclusion_rasters["flood_warning"] = reclassify_exclusion(
+    "flood_warning_clip_raster", "reclass_flood_warning", "Flood Warning Areas")
 exclusion_rasters["designated"] = reclassify_exclusion(
     "designated_sites_clip_raster", "reclass_designated", "Designated sites")
 exclusion_rasters["urban"] = reclassify_exclusion(
@@ -3993,11 +3999,13 @@ exclusion_rasters["urban"] = reclassify_exclusion(
 exclusion_rasters["habitats"] = reclassify_exclusion(
     "priority_habitats_clip_raster", "reclass_habitats", "Priority habitats")
 
-# Slope reclassification — suitable if slope < 15 degrees
-slope_reclass = Con(Raster("slope_degrees") <= 15, 1, 0)
+# Slope reclassification — threshold depends on brief (ask the user!)
+# Common values: 10° for agriculture, 15° for renewables, 30° for housing
+SLOPE_THRESHOLD = 30  # ← UPDATE this to match the brief
+slope_reclass = Con(Raster("slope_degrees") <= SLOPE_THRESHOLD, 1, 0)
 slope_reclass.save("reclass_slope")
 exclusion_rasters["slope"] = "reclass_slope"
-print("  Reclassified slope: <=15deg=1, >15deg=0")
+print(f"  Reclassified slope: <={SLOPE_THRESHOLD}deg=1, >{SLOPE_THRESHOLD}deg=0")
 
 # ALC reclassification — protect best agricultural land (Grades 1, 2, 3a)
 # Grade 1/2/3a = unsuitable (protected), Grade 3b/4/5/Non-Ag = suitable
@@ -4072,15 +4080,23 @@ arcpy.management.CalculateGeometryAttributes(
     length_unit="METERS",
 )
 
-# Filter by minimum area (e.g., patches > 1 hectare)
-MIN_AREA_HA = 1.0
-arcpy.management.MakeFeatureLayer(
-    "suitable_patches", "large_patches_lyr", f"AREA_HA >= {MIN_AREA_HA}"
-)
-arcpy.management.CopyFeatures("large_patches_lyr", "suitable_patches_final")
+# Filter by area range — brief may specify min AND max
+# Housing brief: 30-100 houses with gardens = approximately 1-4 ha
+MIN_AREA_HA = 1.0   # ← minimum from brief (ask user if not specified)
+MAX_AREA_HA = None   # ← set to None for no upper limit, or e.g. 4.0
+
+if MAX_AREA_HA:
+    where = f"AREA_HA >= {MIN_AREA_HA} AND AREA_HA <= {MAX_AREA_HA}"
+    label = f"{MIN_AREA_HA}-{MAX_AREA_HA} ha"
+else:
+    where = f"AREA_HA >= {MIN_AREA_HA}"
+    label = f">= {MIN_AREA_HA} ha"
+
+arcpy.management.MakeFeatureLayer("suitable_patches", "filtered_lyr", where)
+arcpy.management.CopyFeatures("filtered_lyr", "suitable_patches_final")
 
 count = int(arcpy.management.GetCount("suitable_patches_final")[0])
-print(f"Suitable patches >= {MIN_AREA_HA} ha: {count}")
+print(f"Suitable patches ({label}): {count}")
 
 # Summary statistics
 with arcpy.da.SearchCursor("suitable_patches_final", ["AREA_HA"]) as cursor:
@@ -4127,28 +4143,77 @@ layout2.exportToJPEG(
     resolution=300, jpeg_quality=95,
 )
 
-# === MAP 3: Final suitability result (two detail maps side-by-side) ===
-layout3 = aprx.createLayout(29.7, 21, "CENTIMETER", "Map 3 - Suitability")
+# === MAP 3: Two site detail views with desirable criteria + aerial imagery ===
+# Map 3 shows ONE view per selected site, side-by-side on A4.
+# Each view has: aerial background, site outline, desirable criteria layers.
+layout3 = aprx.createLayout(29.7, 21, "CENTIMETER", "Map 3 - Site Details")
 
-# Left: full suitability raster with binary symbology
+# Create two separate maps for independent layer control per site
+site1_map = aprx.createMap("Site 1 Detail", "MAP")
+site2_map = aprx.createMap("Site 2 Detail", "MAP")
+
+# Add aerial imagery as basemap for both detail maps
+for m in [site1_map, site2_map]:
+    # Add aerial raster or tile layer as background
+    if arcpy.Exists(r"C:\Data\Digimap\Aerial"):
+        m.addDataFromPath(r"C:\Data\Digimap\Aerial")
+    # Add site outline and desirable criteria layers
+    m.addDataFromPath(os.path.join(GDB, "selected_sites"))
+    # Desirable criteria layers — these are NOT in the model,
+    # they're shown on Map 3 to support site comparison
+    for desirable_lyr in [
+        "greenspace", "bus_stops", "train_stations",
+        "schools", "shops_services", "gp_surgeries",
+        "flood_alert_areas", "urban_areas_clip",
+    ]:
+        if arcpy.Exists(os.path.join(GDB, desirable_lyr)):
+            m.addDataFromPath(os.path.join(GDB, desirable_lyr))
+
+# Left frame: Site 1 detail
 left_frame = layout3.createMapFrame(
-    arcpy.Extent(1, 3, 14, 19), map1, "Suitability Full"
+    arcpy.Extent(1, 3, 14, 19), site1_map, "Site 1 Detail"
+)
+# Right frame: Site 2 detail
+right_frame = layout3.createMapFrame(
+    arcpy.Extent(15, 3, 28, 19), site2_map, "Site 2 Detail"
 )
 
-# Right: zoomed detail of best patches
-right_frame = layout3.createMapFrame(
-    arcpy.Extent(15, 3, 28, 19), map1, "Suitability Detail"
-)
-# Zoom to the largest suitable patch
-with arcpy.da.SearchCursor(
-    "suitable_patches_final", ["SHAPE@"], sql_clause=(None, "ORDER BY AREA_HA DESC")
-) as cursor:
-    largest = next(cursor)[0]
-    right_frame.camera.setExtent(largest.extent)
-    right_frame.camera.scale *= 1.2  # add 20% padding
+# Zoom each frame to its site with padding
+with arcpy.da.SearchCursor("selected_sites", ["SHAPE@", "SITE_NAME"]) as cursor:
+    sites = [(row[0], row[1]) for row in cursor]
+
+if len(sites) >= 2:
+    left_frame.camera.setExtent(sites[0][0].extent)
+    left_frame.camera.scale *= 1.5   # 50% padding for context
+    right_frame.camera.setExtent(sites[1][0].extent)
+    right_frame.camera.scale *= 1.5
+
+    # Add site labels
+    title_left = layout3.createGraphicElement(
+        arcpy.Point(7.5, 19.5), "TEXT", "Site 1 Label"
+    )
+    cim = title_left.getDefinition("V3")
+    cim.textString = f"Site 1: {sites[0][1]}"
+    cim.textSymbol.symbol.height = 10
+    title_left.setDefinition(cim)
+
+    title_right = layout3.createGraphicElement(
+        arcpy.Point(21.5, 19.5), "TEXT", "Site 2 Label"
+    )
+    cim = title_right.getDefinition("V3")
+    cim.textString = f"Site 2: {sites[1][1]}"
+    cim.textSymbol.symbol.height = 10
+    title_right.setDefinition(cim)
+
+# Add map elements (scale bar, north arrow, legend, copyright)
+layout3.createMapSurroundElement(arcpy.Point(14.85, 20.5), "TEXT", "Map3Title")
+layout3.createMapSurroundElement(arcpy.Point(5, 1.5), "SCALE_BAR", "SB3", left_frame)
+layout3.createMapSurroundElement(arcpy.Point(19, 1.5), "SCALE_BAR", "SB3R", right_frame)
+layout3.createMapSurroundElement(arcpy.Point(2, 17), "NORTH_ARROW", "NA3", left_frame)
+layout3.createMapSurroundElement(arcpy.Point(23, 10), "LEGEND", "Leg3", left_frame)
 
 layout3.exportToJPEG(
-    os.path.join(PROJECT_DIR, "Map3_Suitability.jpg"),
+    os.path.join(PROJECT_DIR, "Map3_SiteDetails.jpg"),
     resolution=300, jpeg_quality=95,
 )
 
@@ -4857,4 +4922,750 @@ PHASE 5: MAP PRODUCTION (iterative)
   → EXPORT new preview
   → Repeat until approved
   → EXPORT final (300 dpi)
+```
+
+---
+
+## Desirable Criteria — Proximity Analysis for Site Selection
+
+Desirable criteria are NOT part of the suitability model. They are used AFTER
+the model produces suitable patches to help the user pick the best site(s).
+These are spatial proximity calculations: how close is each patch to amenities,
+services, transport, and greenspace?
+
+### Load desirable criteria data
+```python
+# These datasets are NOT exclusion layers — they go on Map 3 only
+DESIRABLE_DATASETS = {
+    # Name in GDB          Source file path
+    "greenspace":          r"C:\Data\OS\GreenspaceSite.shp",
+    "bus_stops":           r"C:\Data\NaPTAN\Stops.csv",        # National Public Transport
+    "train_stations":      r"C:\Data\NaPTAN\RailReferences.csv",
+    "schools":             r"C:\Data\OS\important_building.shp",  # filter type=school
+    "shops_services":      r"C:\Data\OS\important_building.shp",  # filter type=retail
+    "gp_surgeries":        r"C:\Data\NHS\gp_practices.csv",
+    "flood_alert_areas":   r"C:\Data\EA\Flood_Alert_Areas.shp",
+}
+
+# Load and clip to study area (with buffer for context)
+for name, source in DESIRABLE_DATASETS.items():
+    if not os.path.exists(source):
+        print(f"  SKIP {name}: source file not found at {source}")
+        continue
+
+    # Import to geodatabase
+    if source.endswith(".csv"):
+        # CSV with coordinates → point feature class
+        arcpy.management.XYTableToPoint(
+            source, os.path.join(GDB, name),
+            x_field="Easting", y_field="Northing",
+            coordinate_system=arcpy.SpatialReference(27700),
+        )
+    else:
+        arcpy.conversion.FeatureClassToFeatureClass(
+            source, GDB, name,
+        )
+
+    # Clip to study area (with 2km buffer for context beyond site boundary)
+    arcpy.analysis.Buffer("study_area", "study_area_2km", "2000 Meters")
+    arcpy.analysis.Clip(name, "study_area_2km", f"{name}_clip")
+    count = int(arcpy.management.GetCount(f"{name}_clip")[0])
+    print(f"  {name}: {count} features loaded")
+```
+
+### Calculate proximity scores for each suitable patch
+```python
+def calculate_proximity_scores(patches_fc, desirable_layers):
+    """For each suitable patch, calculate distance to nearest amenity.
+
+    Adds fields to the patches feature class:
+      DIST_GREENSPACE, DIST_BUS, DIST_TRAIN, DIST_SCHOOL, etc.
+
+    Lower distance = better site for that criterion.
+    """
+    results = {}
+
+    for layer_name, field_name in desirable_layers.items():
+        target = f"{layer_name}_clip"
+        if not arcpy.Exists(target) or int(arcpy.management.GetCount(target)[0]) == 0:
+            print(f"  SKIP {layer_name}: no features in study area")
+            continue
+
+        # Near tool calculates distance from each patch centroid
+        # to nearest feature in the desirable layer
+        arcpy.analysis.Near(patches_fc, target, search_radius="10000 Meters")
+
+        # Rename NEAR_DIST to descriptive field name
+        if not field_name in [f.name for f in arcpy.ListFields(patches_fc)]:
+            arcpy.management.AddField(patches_fc, field_name, "DOUBLE")
+        arcpy.management.CalculateField(
+            patches_fc, field_name, "!NEAR_DIST!", "PYTHON3"
+        )
+
+        # Clean up Near tool fields
+        arcpy.management.DeleteField(patches_fc, ["NEAR_FID", "NEAR_DIST"])
+
+        # Report
+        with arcpy.da.SearchCursor(patches_fc, [field_name]) as cursor:
+            distances = [row[0] for row in cursor if row[0] is not None]
+        if distances:
+            print(f"  {field_name}: min={min(distances):.0f}m, "
+                  f"max={max(distances):.0f}m, mean={sum(distances)/len(distances):.0f}m")
+            results[field_name] = distances
+
+    return results
+
+
+# Define what to measure
+DESIRABLE_PROXIMITY = {
+    "greenspace":       "DIST_GREENSPACE",
+    "bus_stops":        "DIST_BUS",
+    "train_stations":   "DIST_TRAIN",
+    "schools":          "DIST_SCHOOL",
+    "shops_services":   "DIST_SHOPS",
+    "gp_surgeries":     "DIST_GP",
+    "flood_alert_areas":"DIST_FLOOD_ALERT",
+}
+
+calculate_proximity_scores("suitable_patches_final", DESIRABLE_PROXIMITY)
+```
+
+### Check adjacency to existing urban areas
+```python
+def check_urban_adjacency(patches_fc, urban_fc, max_distance=200):
+    """Flag patches that are adjacent to existing urban areas.
+
+    'Adjacent' = within max_distance metres of urban boundary.
+    This is DESIRABLE for housing (natural extension of settlement).
+    """
+    arcpy.analysis.Near(patches_fc, urban_fc, search_radius=f"{max_distance} Meters")
+
+    # Add boolean field
+    arcpy.management.AddField(patches_fc, "ADJACENT_URBAN", "SHORT")
+    arcpy.management.CalculateField(
+        patches_fc, "ADJACENT_URBAN",
+        f"1 if !NEAR_DIST! >= 0 and !NEAR_DIST! <= {max_distance} else 0",
+        "PYTHON3",
+    )
+
+    # Report
+    with arcpy.da.SearchCursor(patches_fc, ["ADJACENT_URBAN"]) as cursor:
+        adjacent = sum(1 for row in cursor if row[0] == 1)
+    total = int(arcpy.management.GetCount(patches_fc)[0])
+    print(f"  {adjacent} of {total} patches are within {max_distance}m of urban areas")
+
+    arcpy.management.DeleteField(patches_fc, ["NEAR_FID", "NEAR_DIST"])
+
+check_urban_adjacency("suitable_patches_final", "urban_areas_clip")
+```
+
+### Present desirable criteria summary table
+```python
+def print_site_comparison_table(patches_fc, top_n=10):
+    """Print a ranked comparison table of the best patches.
+
+    Shows area, all proximity distances, and urban adjacency.
+    Helps the user pick their final 2 sites.
+    """
+    fields = ["OID@", "AREA_HA", "ADJACENT_URBAN"]
+    # Add all DIST_ fields
+    dist_fields = [f.name for f in arcpy.ListFields(patches_fc) if f.name.startswith("DIST_")]
+    fields.extend(dist_fields)
+
+    rows = []
+    with arcpy.da.SearchCursor(patches_fc, fields) as cursor:
+        for row in cursor:
+            rows.append(dict(zip(fields, row)))
+
+    # Sort by area (largest first)
+    rows.sort(key=lambda r: r["AREA_HA"], reverse=True)
+    top = rows[:top_n]
+
+    # Print table
+    print(f"\n{'='*90}")
+    print(f"TOP {len(top)} SUITABLE PATCHES — DESIRABLE CRITERIA COMPARISON")
+    print(f"{'='*90}")
+
+    header = f"{'ID':>4}  {'Area(ha)':>8}  {'Urban?':>6}"
+    for df in dist_fields:
+        short = df.replace("DIST_", "")[:8]
+        header += f"  {short:>8}"
+    print(header)
+    print("-" * len(header))
+
+    for r in top:
+        line = f"{r['OID@']:>4}  {r['AREA_HA']:>8.2f}  {'Yes' if r.get('ADJACENT_URBAN') else 'No':>6}"
+        for df in dist_fields:
+            val = r.get(df)
+            if val is not None:
+                line += f"  {val:>7.0f}m"
+            else:
+                line += f"  {'N/A':>8}"
+        print(line)
+
+    print(f"\nLower distances = better. 'Urban?' = adjacent to existing settlement.")
+    print(f"\nWhich 2 patches do you want as your final sites?")
+    print(f"Tell me the IDs and I'll create the site outline polygons.")
+
+print_site_comparison_table("suitable_patches_final")
+```
+
+---
+
+## Site Selection & Digitising — Creating Final Site Polygons
+
+After the user picks their 2 best patches from the comparison table,
+create proper site outline polygons with attributes.
+
+### Create selected sites from patch IDs
+```python
+def create_selected_sites(patches_fc, selected_ids, output_fc, site_names=None):
+    """Extract user-selected patches into a new feature class.
+
+    selected_ids: list of OID values the user chose (e.g. [42, 17])
+    site_names:   optional names (e.g. ["North Field", "River Meadow"])
+    """
+    # Select the chosen patches
+    oid_field = arcpy.Describe(patches_fc).OIDFieldName
+    where = f"{oid_field} IN ({', '.join(str(i) for i in selected_ids)})"
+    arcpy.management.MakeFeatureLayer(patches_fc, "selected_lyr", where)
+    arcpy.management.CopyFeatures("selected_lyr", output_fc)
+
+    # Add site metadata fields
+    arcpy.management.AddField(output_fc, "SITE_NAME", "TEXT", field_length=100)
+    arcpy.management.AddField(output_fc, "SITE_ID", "SHORT")
+    arcpy.management.AddField(output_fc, "DWELLINGS_EST", "SHORT")
+
+    # Estimate dwelling capacity: ~25 dwellings per hectare (typical UK density)
+    DWELLINGS_PER_HA = 25
+
+    with arcpy.da.UpdateCursor(
+        output_fc, ["SITE_ID", "SITE_NAME", "AREA_HA", "DWELLINGS_EST"]
+    ) as cursor:
+        for i, row in enumerate(cursor):
+            row[0] = i + 1  # SITE_ID
+            if site_names and i < len(site_names):
+                row[1] = site_names[i]
+            else:
+                row[1] = f"Site {i + 1}"
+            row[3] = int(row[2] * DWELLINGS_PER_HA)  # estimated dwellings
+            cursor.updateRow(row)
+
+    # Report
+    with arcpy.da.SearchCursor(
+        output_fc, ["SITE_ID", "SITE_NAME", "AREA_HA", "DWELLINGS_EST"]
+    ) as cursor:
+        for row in cursor:
+            print(f"  Site {row[0]}: {row[1]}")
+            print(f"    Area: {row[2]:.2f} ha")
+            print(f"    Estimated dwellings: {row[3]} (at {DWELLINGS_PER_HA}/ha)")
+
+    arcpy.management.Delete("selected_lyr")
+    return output_fc
+
+# Usage after user picks their sites:
+# create_selected_sites(
+#     "suitable_patches_final",
+#     selected_ids=[42, 17],
+#     output_fc="selected_sites",
+#     site_names=["North of Oakwood", "River Meadow East"],
+# )
+```
+
+### Manual digitising guidance (when patch shapes need refinement)
+```
+Sometimes the raster-derived patch boundary is too jagged or includes
+unwanted areas. The user may need to manually digitise a cleaner outline.
+
+Claude Code CANNOT do interactive digitising — this requires ArcGIS Pro UI.
+Give the user these instructions:
+
+1. Open the "selected_sites" feature class in ArcGIS Pro
+2. Start an Edit session (Edit tab → Create)
+3. Select the site polygon you want to refine
+4. Right-click → Edit Vertices
+5. Drag vertices to clean up the boundary
+6. Or: delete the feature and draw a new polygon using the
+   Polygon construction tool, snapping to the original shape
+7. Save Edits when done
+
+After manual edits, recalculate geometry:
+```
+```python
+arcpy.management.CalculateGeometryAttributes(
+    "selected_sites",
+    [["AREA_HA", "AREA"], ["PERIMETER_M", "PERIMETER_LENGTH"]],
+    area_unit="HECTARES", length_unit="METERS",
+)
+```
+
+### Workspace cleanup — remove intermediate layers
+```python
+def cleanup_intermediate_layers(gdb_path, keep_patterns=None):
+    """Delete intermediate datasets, keep only final outputs.
+
+    keep_patterns: list of name patterns to preserve.
+    Default keeps: study_area, selected_sites, suitable_patches_final,
+                   suitability_result, all *_clip layers, all desirable layers.
+    """
+    if keep_patterns is None:
+        keep_patterns = [
+            "study_area", "selected_sites", "suitable_patches_final",
+            "suitability_result", "reclass_", "_clip",
+            "greenspace", "bus_stops", "train_stations",
+            "schools", "shops_services", "gp_surgeries",
+            "flood_alert",
+        ]
+
+    arcpy.env.workspace = gdb_path
+    all_datasets = (
+        arcpy.ListFeatureClasses() +
+        arcpy.ListRasters() +
+        arcpy.ListTables()
+    )
+
+    to_delete = []
+    to_keep = []
+
+    for ds in all_datasets:
+        if any(pat in ds.lower() for pat in [p.lower() for p in keep_patterns]):
+            to_keep.append(ds)
+        else:
+            to_delete.append(ds)
+
+    print(f"KEEPING {len(to_keep)} datasets:")
+    for ds in sorted(to_keep):
+        print(f"  ✓ {ds}")
+
+    print(f"\nDELETING {len(to_delete)} intermediate datasets:")
+    for ds in sorted(to_delete):
+        print(f"  ✗ {ds}")
+
+    # ASK user before deleting
+    print(f"\nDelete these {len(to_delete)} intermediate datasets? (confirm before proceeding)")
+    # Only delete after user confirms
+    # for ds in to_delete:
+    #     arcpy.management.Delete(ds)
+```
+
+---
+
+## Custom Criteria — Adding Extra Constraints Beyond the Standard Set
+
+Many briefs require 2+ additional criteria chosen by the student with
+literature-backed justification. This section provides a framework for
+selecting, implementing, and justifying custom criteria.
+
+### Common additional criteria for UK housing suitability
+
+| Criterion | Buffer / Rule | Data Source | Justification |
+|-----------|---------------|-------------|---------------|
+| Heritage / listed buildings | ≥100m buffer | Historic England | NPPF (2024) para 200-208: protect heritage assets and their settings |
+| AONB / National Landscapes | Exclude entirely | Natural England (MAGIC) | NPPF (2024) para 182: major development should not occur in AONBs |
+| Green Belt | Exclude entirely | Local authority GIS / MAGIC | NPPF (2024) para 142-156: strong presumption against development |
+| Power lines / pipelines | ≥50m buffer | National Grid / HSE | Health & Safety Executive guidance on development near high-voltage lines |
+| Peat / bog soils | Exclude entirely | BGS / Natural England | NPPF (2024) para 180: protect irreplaceable habitats; peat is carbon store |
+| Local Nature Reserves (LNR) | Exclude entirely | Natural England (MAGIC) | NPPF (2024) para 185: protect local wildlife-rich habitats |
+| Ancient woodland | ≥15m buffer | Natural England | Natural England standing advice: 15m buffer minimum |
+| Noise contours (roads/airports) | Exclude >70dB | Local authority | WHO Environmental Noise Guidelines (2018): health impacts |
+| Contaminated land | Exclude | Local authority register | Environmental Protection Act 1990, Part IIA |
+| Public Rights of Way | ≥5m buffer | OS / local authority | Countryside and Rights of Way Act 2000: maintain access |
+
+### Implementing a custom criterion
+```python
+# Example: Heritage / Listed Buildings with 100m buffer
+
+# 1. Load the data
+heritage_source = r"C:\Data\HistoricEngland\ListedBuildings.shp"
+arcpy.conversion.FeatureClassToFeatureClass(heritage_source, GDB, "listed_buildings")
+arcpy.analysis.Clip("listed_buildings", "study_area", "listed_buildings_clip")
+
+# 2. Buffer
+arcpy.analysis.Buffer(
+    "listed_buildings_clip", "listed_buildings_buffer",
+    "100 Meters", dissolve_option="ALL",
+)
+
+# 3. Convert to raster
+arcpy.env.extent = "study_area"
+arcpy.conversion.PolygonToRaster(
+    "listed_buildings_buffer", "OBJECTID", "listed_buildings_raster",
+    cell_assignment="CELL_CENTER", cellsize=CELL_SIZE,
+)
+
+# 4. Reclassify (same as other exclusion layers)
+exclusion_rasters["heritage"] = reclassify_exclusion(
+    "listed_buildings_raster", "reclass_heritage", "Heritage buffer 100m"
+)
+
+# 5. Include in raster calculator (it's already in the exclusion_rasters dict)
+```
+
+```python
+# Example: AONB / National Landscapes — full exclusion
+
+aonb_source = r"C:\Data\NaturalEngland\Areas_of_Outstanding_Natural_Beauty.shp"
+arcpy.conversion.FeatureClassToFeatureClass(aonb_source, GDB, "aonb")
+arcpy.analysis.Clip("aonb", "study_area", "aonb_clip")
+
+count = int(arcpy.management.GetCount("aonb_clip")[0])
+if count == 0:
+    print("  No AONB in study area — criterion does not apply")
+    print("  → Note this in report section C (missing criteria)")
+else:
+    arcpy.env.extent = "study_area"
+    arcpy.conversion.PolygonToRaster(
+        "aonb_clip", "OBJECTID", "aonb_raster",
+        cell_assignment="CELL_CENTER", cellsize=CELL_SIZE,
+    )
+    exclusion_rasters["aonb"] = reclassify_exclusion(
+        "aonb_raster", "reclass_aonb", "AONB (National Landscape)"
+    )
+```
+
+### Literature justification template
+```
+When adding a custom criterion, justify it with this structure:
+
+CRITERION: [Name]
+RULE: [Buffer distance / exclusion rule]
+JUSTIFICATION:
+  [One sentence on WHY this criterion matters for housing suitability]
+  [Reference to national planning policy — e.g. NPPF 2024 paragraph X]
+  [Reference to academic/practitioner source — e.g. Malczewski, 2004]
+DATA SOURCE: [Exact dataset name and download URL]
+IMPLEMENTATION: [Buffer distance, reclassification rule]
+
+Example:
+  CRITERION: Heritage assets (listed buildings)
+  RULE: 100m buffer — classify as unsuitable
+  JUSTIFICATION:
+    New housing development near listed buildings can harm their
+    historic setting and character. The NPPF (2024, para 200) states
+    that "great weight should be given to the asset's conservation"
+    and that "any harm to, or loss of, the significance of a
+    designated heritage asset... should require clear and convincing
+    justification" (para 206). A 100m buffer provides a minimum
+    protective zone consistent with Historic England's guidance on
+    setting assessment (Historic England, 2017).
+  DATA SOURCE: Historic England — National Heritage List
+    (https://historicengland.org.uk/listing/the-list/)
+  IMPLEMENTATION: Buffer 100m, dissolve, PolygonToRaster, reclassify
+    to binary (present=0, absent=1).
+```
+
+---
+
+## Report Writing Support — Pro-Forma Sections A–G
+
+This section helps Claude Code generate content for the report pro-forma.
+Claude should draft the text; the user reviews and edits.
+
+### Section A: Dataset Reference Table (Harvard style)
+```python
+def generate_dataset_table(datasets_used):
+    """Generate a Harvard-referenced dataset table for the report.
+
+    datasets_used: list of dicts with keys:
+        name, source_org, year, url, what_for
+    """
+    print("| Dataset | Source | Used For |")
+    print("|---------|--------|----------|")
+    for ds in datasets_used:
+        ref = f"{ds['source_org']} ({ds['year']})"
+        print(f"| {ds['name']} | {ref} | {ds['what_for']} |")
+
+    print("\n--- Harvard References ---\n")
+    # Sort alphabetically by source org for reference list
+    for ds in sorted(datasets_used, key=lambda d: d["source_org"]):
+        print(f"{ds['source_org']} ({ds['year']}) {ds['name']}. "
+              f"Available at: {ds['url']} (Accessed: [DATE]).")
+
+# Standard UK suitability datasets
+DATASETS_USED = [
+    {
+        "name": "OS VectorMap Local (Roads, Rail, Urban, Watercourses)",
+        "source_org": "Ordnance Survey",
+        "year": "2024",
+        "url": "https://digimap.edina.ac.uk",
+        "what_for": "Buffer analysis (roads, rail, watercourses), urban exclusion",
+    },
+    {
+        "name": "OS Terrain 5 DTM",
+        "source_org": "Ordnance Survey",
+        "year": "2024",
+        "url": "https://digimap.edina.ac.uk",
+        "what_for": "Slope generation for terrain constraint",
+    },
+    {
+        "name": "Flood Map for Planning (Flood Zones 2 & 3)",
+        "source_org": "Environment Agency",
+        "year": "2024",
+        "url": "https://www.data.gov.uk/dataset/flood-map-for-planning",
+        "what_for": "Flood zone exclusion",
+    },
+    {
+        "name": "Flood Warning Areas",
+        "source_org": "Environment Agency",
+        "year": "2024",
+        "url": "https://www.data.gov.uk/dataset/flood-warning-areas",
+        "what_for": "Essential flood exclusion criterion",
+    },
+    {
+        "name": "Flood Alert Areas",
+        "source_org": "Environment Agency",
+        "year": "2024",
+        "url": "https://www.data.gov.uk/dataset/flood-alert-areas",
+        "what_for": "Desirable criterion (Map 3)",
+    },
+    {
+        "name": "Agricultural Land Classification",
+        "source_org": "Natural England",
+        "year": "2024",
+        "url": "https://magic.defra.gov.uk",
+        "what_for": "Grade 1/2 agricultural land exclusion",
+    },
+    {
+        "name": "Priority Habitat Inventory",
+        "source_org": "Natural England",
+        "year": "2024",
+        "url": "https://magic.defra.gov.uk",
+        "what_for": "Habitat exclusion",
+    },
+    {
+        "name": "Sites of Special Scientific Interest",
+        "source_org": "Natural England",
+        "year": "2024",
+        "url": "https://magic.defra.gov.uk",
+        "what_for": "Designated site exclusion",
+    },
+    {
+        "name": "National Woodland Inventory",
+        "source_org": "Forestry Commission",
+        "year": "2024",
+        "url": "https://magic.defra.gov.uk",
+        "what_for": "Woodland buffer exclusion",
+    },
+    {
+        "name": "OS MasterMap 1:25,000 Raster",
+        "source_org": "Ordnance Survey",
+        "year": "2024",
+        "url": "https://digimap.edina.ac.uk",
+        "what_for": "Basemap for all maps",
+    },
+]
+```
+
+### Section B: Custom Criteria Justification
+```
+Draft structure for the user's 2 custom criteria:
+
+Criterion 1: [NAME]
+  This criterion was included because [1 sentence reason].
+  The NPPF (2024, para X) states that "[relevant quote]".
+  [Academic source] found that [relevant finding].
+  A buffer of [X]m was applied based on [source guidance].
+
+Criterion 2: [NAME]
+  [Same structure as above]
+
+Claude should draft this text based on:
+- Which criterion the user chose
+- The literature justification from the custom criteria table above
+- The actual data found in the study area
+```
+
+### Section C: Absent Criteria
+```python
+def identify_absent_criteria(exclusion_rasters, study_area):
+    """Identify criteria from the brief that have no data in the study area.
+
+    Some constraints may be absent — e.g., no flood zones, no SSSI.
+    This is normal and should be documented in section C.
+    """
+    absent = []
+    for name, path in exclusion_rasters.items():
+        if path is None:
+            absent.append({"criterion": name, "reason": "Dataset not available"})
+            continue
+        r = arcpy.Raster(path)
+        # If reclassified raster is ALL 1 (all suitable), the constraint
+        # has no effect — it's absent from the study area
+        if r.minimum == 1 and r.maximum == 1:
+            absent.append({
+                "criterion": name,
+                "reason": "No features in study area (all cells suitable)",
+            })
+
+    if absent:
+        print(f"\nCriteria with NO EFFECT in this study area:")
+        for a in absent:
+            print(f"  - {a['criterion']}: {a['reason']}")
+        print(f"\n→ Document these in report section C.")
+        print(f"  Explain WHY they're absent (e.g., 'The study area in")
+        print(f"  [town] does not contain any SSSIs, so this criterion")
+        print(f"  had no effect on the suitability output.')")
+    else:
+        print("All criteria are active in the study area.")
+
+    return absent
+```
+
+### Section D: Site Comparison and Recommendation
+```python
+def generate_site_comparison(sites_fc):
+    """Generate a structured comparison of the 2 selected sites.
+
+    Reads all proximity fields and produces a comparative summary
+    that the user can adapt for section D of the report.
+    """
+    fields = [f.name for f in arcpy.ListFields(sites_fc)]
+    dist_fields = [f for f in fields if f.startswith("DIST_")]
+
+    sites = []
+    with arcpy.da.SearchCursor(sites_fc, ["SITE_ID", "SITE_NAME", "AREA_HA",
+                                           "DWELLINGS_EST", "ADJACENT_URBAN"]
+                                           + dist_fields) as cursor:
+        for row in cursor:
+            site = dict(zip(["SITE_ID", "SITE_NAME", "AREA_HA",
+                            "DWELLINGS_EST", "ADJACENT_URBAN"] + dist_fields, row))
+            sites.append(site)
+
+    if len(sites) < 2:
+        print("Need at least 2 sites for comparison")
+        return
+
+    s1, s2 = sites[0], sites[1]
+
+    print(f"\n{'='*70}")
+    print(f"SITE COMPARISON — Section D Draft")
+    print(f"{'='*70}\n")
+
+    print(f"{'Criterion':<25} {'Site 1':>15} {'Site 2':>15} {'Better':>10}")
+    print("-" * 65)
+
+    # Area
+    better = "Site 1" if s1["AREA_HA"] > s2["AREA_HA"] else "Site 2"
+    print(f"{'Area (ha)':<25} {s1['AREA_HA']:>14.2f} {s2['AREA_HA']:>14.2f} {better:>10}")
+
+    # Dwellings
+    better = "Site 1" if s1["DWELLINGS_EST"] > s2["DWELLINGS_EST"] else "Site 2"
+    print(f"{'Est. dwellings':<25} {s1['DWELLINGS_EST']:>15} {s2['DWELLINGS_EST']:>15} {better:>10}")
+
+    # Urban adjacency
+    adj1 = "Yes" if s1.get("ADJACENT_URBAN") else "No"
+    adj2 = "Yes" if s2.get("ADJACENT_URBAN") else "No"
+    print(f"{'Adjacent to urban':<25} {adj1:>15} {adj2:>15}")
+
+    # Proximity fields (lower = better)
+    for df in dist_fields:
+        v1 = s1.get(df)
+        v2 = s2.get(df)
+        if v1 is not None and v2 is not None:
+            better = "Site 1" if v1 < v2 else "Site 2"
+            label = df.replace("DIST_", "Dist to ")
+            print(f"{label:<25} {v1:>14.0f}m {v2:>14.0f}m {better:>10}")
+
+    print(f"\n--- Draft recommendation ---")
+    print(f"Based on the comparison above, Claude should draft:")
+    print(f"  'Site [X] is recommended because [reasons from table].'")
+    print(f"  'While Site [Y] scores better on [criterion], Site [X]'")
+    print(f"  'offers [key advantages] which align with NPPF (2024)'")
+    print(f"  'objectives for sustainable development (para 8).'")
+    print(f"\nThe user should review and personalise this text.")
+
+generate_site_comparison("selected_sites")
+```
+
+### Section E: Suggested Additional Criteria
+```
+Claude should suggest criteria that COULD improve the model but were
+not included. Draft structure:
+
+"The model could be improved by incorporating the following criteria:
+
+1. [Criterion name]: [Why it matters]. [Academic/policy reference].
+   This was not included due to [data availability / scope].
+
+2. [Criterion name]: [Why it matters]. [Academic/policy reference].
+   This was not included due to [data availability / scope]."
+
+Good suggestions to draw from:
+- Noise pollution contours (WHO, 2018)
+- Air quality zones (DEFRA, local authority data)
+- Soil percolation / drainage (BGS data)
+- Landscape character assessment (local authority)
+- Archaeological potential (Historic Environment Record)
+- Climate change flood projections (EA)
+- Walking distance to public transport (CIHT, 2015)
+```
+
+### Section F: Reference List (Harvard format)
+```
+Standard references for UK housing suitability analysis:
+
+Department for Levelling Up, Housing and Communities (2024) National
+  Planning Policy Framework. London: HMSO. Available at:
+  https://www.gov.uk/government/publications/national-planning-policy-framework
+  (Accessed: [DATE]).
+
+Environment Agency (2024) Flood Map for Planning. Available at:
+  https://www.data.gov.uk/dataset/flood-map-for-planning (Accessed: [DATE]).
+
+Historic England (2017) The Setting of Heritage Assets: Historic Environment
+  Good Practice Advice in Planning Note 3. 2nd edn. Available at:
+  https://historicengland.org.uk/images-books/publications/gpa3-setting-of-heritage-assets/
+  (Accessed: [DATE]).
+
+Homes England (2024) Strategic Plan 2023–2028. Available at:
+  https://www.gov.uk/government/publications/homes-england-strategic-plan-2023-to-2028
+  (Accessed: [DATE]).
+
+Malczewski, J. (2004) 'GIS-based land-use suitability analysis: a critical
+  overview', Progress in Planning, 62(1), pp. 3–65.
+  doi:10.1016/j.progress.2003.09.002.
+
+Natural England (2024) Agricultural Land Classification: Protecting the Best
+  and Most Versatile Agricultural Land. Available at:
+  https://magic.defra.gov.uk (Accessed: [DATE]).
+
+Natural England (2024) Priority Habitat Inventory. Available at:
+  https://magic.defra.gov.uk (Accessed: [DATE]).
+
+Ordnance Survey (2024) OS VectorMap Local. Available at:
+  https://digimap.edina.ac.uk (Accessed: [DATE]).
+
+Watson, J.J.W. and Hudson, M.D. (2015) 'Regional Scale wind farm and solar
+  farm suitability assessment using GIS-assisted multi-criteria evaluation',
+  Landscape and Urban Planning, 138, pp. 20–31.
+  doi:10.1016/j.landurbplan.2015.02.001.
+
+World Health Organization (2018) Environmental Noise Guidelines for the
+  European Region. Copenhagen: WHO Regional Office for Europe.
+```
+
+### Flood Warning vs Flood Alert — Important Distinction
+
+The brief may reference both. They are DIFFERENT EA datasets:
+
+| Dataset | What It Means | Use In Analysis |
+|---------|---------------|-----------------|
+| **Flood Zones 2 & 3** | Planning zones based on probability | Common exclusion layer (Zones 2/3 = unsuitable) |
+| **Flood Warning Areas** | Operational: EA can issue flood warnings here | Stronger exclusion — these areas have KNOWN flood risk |
+| **Flood Alert Areas** | Operational: EA can issue flood alerts (wider) | Desirable criterion only — show on Map 3, don't exclude |
+
+```python
+# Load BOTH flood datasets — they serve different purposes
+# Flood Warning Areas → EXCLUSION (essential criterion)
+arcpy.conversion.FeatureClassToFeatureClass(
+    r"C:\Data\EA\Flood_Warning_Areas.shp", GDB, "flood_warning"
+)
+arcpy.analysis.Clip("flood_warning", "study_area", "flood_warning_clip")
+
+# Flood Alert Areas → DESIRABLE only (Map 3 layer, NOT in model)
+arcpy.conversion.FeatureClassToFeatureClass(
+    r"C:\Data\EA\Flood_Alert_Areas.shp", GDB, "flood_alert"
+)
+arcpy.analysis.Clip("flood_alert", "study_area_2km", "flood_alert_clip")
+# Clipped to 2km buffer because it's context for Map 3, not exclusion
 ```
