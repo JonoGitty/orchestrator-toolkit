@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.0 — Strip to Core
+
+Removed the plan execution engine. Claude Code already handles building and
+running projects — the toolkit now focuses purely on skill pack management
+and the plugin system.
+
+### Removed
+- Plan execution engine (`runtime/plan_runner.py`) — stack detection, dep
+  install, building, launchers
+- LLM integration (`cloud_agent/`) — plan generation via OpenAI
+- `generate`, `execute`, `run` CLI commands
+- Patchwork audit plugin (hooks only fired during plan execution)
+- `utils/runner.py`, `utils/helper.py`, `utils/backup.py`
+- `local_agent/` directory (leftover from v0.1.0)
+- `scripts/` directory (backup systemd timers)
+- LLM and security config sections
+- `openai` and `keyring` dependencies
+
+### Changed
+- `orchestrator.py` stripped from ~280 to ~170 lines — skill pack CLI only
+- `config.py` simplified to plugins config only
+- README rewritten around skill packs as the core value proposition
+- Test suite cleaned — removed plan parsing and integration tests
+- `setup.py` simplified — no more API key setup instructions
+
 ## v0.3.0 — Skill Pack System + ArcGIS Domain Pack
 
 New skill pack architecture that gives AI coding agents domain expertise via

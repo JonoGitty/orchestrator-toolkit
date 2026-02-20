@@ -12,43 +12,13 @@ from typing import Any, Dict, List, Optional
 
 
 DEFAULT_CONFIG = {
-    "llm": {
-        "model": "gpt-4.1",
-        "temperature": 1.0,
-        "max_retries": 3,
-        "cache_enabled": True,
-        "cache_ttl_seconds": 86400,
-    },
-    "paths": {
-        "output_dir": "output",
-        "config_dir": "~/.config/orchestrator-toolkit",
-    },
     "plugins": {
         "enabled": [],
         "disabled": [],
         "plugin_dir": "plugins",
         "discover_entry_points": True,
     },
-    "security": {
-        "prefer_keyring": True,
-        "allow_plaintext_fallback": True,
-    },
 }
-
-
-@dataclass
-class LLMConfig:
-    model: str = "gpt-4.1"
-    temperature: float = 1.0
-    max_retries: int = 3
-    cache_enabled: bool = True
-    cache_ttl_seconds: int = 86400
-
-
-@dataclass
-class PathsConfig:
-    output_dir: str = "output"
-    config_dir: str = "~/.config/orchestrator-toolkit"
 
 
 @dataclass
@@ -60,40 +30,25 @@ class PluginsConfig:
 
 
 @dataclass
-class SecurityConfig:
-    prefer_keyring: bool = True
-    allow_plaintext_fallback: bool = True
-
-
-@dataclass
 class Config:
-    llm: LLMConfig
-    paths: PathsConfig
     plugins: PluginsConfig
-    security: SecurityConfig
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Config:
         return cls(
-            llm=LLMConfig(**data.get("llm", {})),
-            paths=PathsConfig(**data.get("paths", {})),
             plugins=PluginsConfig(**data.get("plugins", {})),
-            security=SecurityConfig(**data.get("security", {})),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "llm": asdict(self.llm),
-            "paths": asdict(self.paths),
             "plugins": asdict(self.plugins),
-            "security": asdict(self.security),
         }
 
 
 class ConfigManager:
     def __init__(self, config_file: Optional[Path] = None):
         if config_file is None:
-            config_dir = Path(os.path.expanduser(DEFAULT_CONFIG["paths"]["config_dir"]))
+            config_dir = Path(os.path.expanduser("~/.config/orchestrator-toolkit"))
             config_dir.mkdir(parents=True, exist_ok=True)
             config_file = config_dir / "config.json"
         self.config_file = config_file

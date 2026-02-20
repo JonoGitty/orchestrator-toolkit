@@ -2,7 +2,7 @@
 
 Skill pack manager for AI coding agents. Creates and manages domain knowledge
 packs that teach Claude Code / OpenClaw about specific domains (ArcGIS, Terraform,
-data science, etc.). Patchwork (codex-audit) tracks everything.
+data science, etc.).
 
 ## What is a skill pack?
 
@@ -28,21 +28,12 @@ orchestrator list-packs              # Show available packs
 orchestrator plugins                 # List loaded hook plugins
 ```
 
-Plan execution (CI/headless):
-```
-orchestrator generate <prompt>       # LLM prompt -> plan -> build
-orchestrator execute <plan.json>     # Apply existing plan
-orchestrator run <project_dir>       # Run built project
-```
-
 ## Architecture
 
 - `packs/` — skill pack directory (domain knowledge + SKILL.md)
 - `scaffolds/` — templates for generating new skill packs
 - `plugins/__init__.py` — PluginManager for hook-based plugins
-- `plugins/patchwork_audit.py` — audit trail via codex-audit
-- `orchestrator.py` — CLI and core API
-- `runtime/plan_runner.py` — plan execution engine
+- `orchestrator.py` — CLI
 - `config.py` — configuration management
 
 ## Key Conventions

@@ -1,8 +1,2 @@
-# Core
-openai>=1.0.0
-
-# Optional
-keyring>=23.0.0
-
 # Dev
 pytest>=7.0.0

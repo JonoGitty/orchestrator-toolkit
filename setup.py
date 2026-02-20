@@ -28,10 +28,8 @@ def main() -> None:
 
     # Pip & python inside venv
     if os.name == "nt":
-        venv_python = VENV_DIR / "Scripts" / "python.exe"
         venv_pip = VENV_DIR / "Scripts" / "pip.exe"
     else:
-        venv_python = VENV_DIR / "bin" / "python"
         venv_pip = VENV_DIR / "bin" / "pip"
 
     # Install deps
@@ -40,22 +38,15 @@ def main() -> None:
         print("\nInstalling dependencies ...")
         run([str(venv_pip), "install", "-r", str(req)])
 
-    # API key config
-    print("\n=== API Key Configuration ===")
-    print("The orchestrator uses an LLM for plan generation.")
-    print("Set your API key via one of:")
-    print(f"  1. Environment variable: export OPENAI_API_KEY='your-key'")
-    print(f"  2. Local file: {ROOT / 'cloud_agent' / 'apikey.txt'}")
-    print(f"  3. System keyring")
-    print(f"  4. Config file: ~/.config/orchestrator-toolkit/openai_api_key")
-
     print(f"\nDone! Activate the venv with:")
     if os.name == "nt":
         print(f"  {VENV_DIR}\\Scripts\\activate")
     else:
         print(f"  source {VENV_DIR}/bin/activate")
     print(f"\nThen run:")
-    print(f"  python orchestrator.py generate 'build a hello world API'")
+    print(f"  python orchestrator.py list-packs")
+    print(f"  python orchestrator.py new-skill <name>")
+    print(f"  python orchestrator.py install-skill <name>")
 
 
 if __name__ == "__main__":
