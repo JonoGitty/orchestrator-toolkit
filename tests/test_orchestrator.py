@@ -572,6 +572,38 @@ class TestArcGISPack:
         assert "digimap.edina.ac.uk" in context or "Edina Digimap" in context
         assert "magic.defra.gov.uk" in context
 
+    def test_context_has_validation_checkpoints(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Validation Checkpoints" in context
+        assert "validate_data_loaded" in context
+        assert "validate_clip_results" in context
+        assert "validate_reclassified" in context
+        assert "validate_suitability_result" in context
+
+    def test_context_has_decision_points(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Decision Points" in context
+        assert "When to ask" in context or "When to Ask" in context
+        assert "Buffer distances" in context
+        assert "Reclassification thresholds" in context
+        assert "log_decision" in context
+
+    def test_context_has_visual_review(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Visual Review" in context
+        assert "export_preview" in context
+        assert "describe_layout" in context
+        assert "elementPositionX" in context
+        assert "Screenshot review" in context or "screenshot" in context.lower()
+
+    def test_context_has_interactive_workflow(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Interactive Workflow" in context
+        assert "PHASE 1" in context
+        assert "PHASE 5" in context
+        assert "ASK" in context
+        assert "VALIDATE" in context
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

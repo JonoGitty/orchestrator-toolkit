@@ -3787,3 +3787,547 @@ When a user asks for help:
 2. **Flag manual steps** — clearly note what must be done in ArcGIS Pro UI
 3. **Provide instructions for manual steps** — describe exactly what to click/configure
 4. **Suggest workarounds** — e.g., export to lyrx/stylx for symbology templates
+
+---
+
+## Validation Checkpoints — How to Know the Output Is Right
+
+After every major operation, run validation checks to catch errors early.
+Do NOT proceed to the next step until the current step passes validation.
+
+### After loading data (Step 3)
+```python
+def validate_data_loaded(expected_datasets, gdb_path):
+    """Check that all required datasets exist and have features."""
+    arcpy.env.workspace = gdb_path
+    issues = []
+
+    for name in expected_datasets:
+        if not arcpy.Exists(name):
+            issues.append(f"MISSING: {name} does not exist in the geodatabase")
+            continue
+        count = int(arcpy.management.GetCount(name)[0])
+        if count == 0:
+            issues.append(f"EMPTY: {name} has 0 features — check the source data")
+        else:
+            desc = arcpy.Describe(name)
+            sr = desc.spatialReference
+            print(f"  OK: {name} — {count} features, CRS: {sr.name} (EPSG:{sr.factoryCode})")
+            # Warn if not in expected CRS
+            if sr.factoryCode != 27700:  # BNG
+                issues.append(
+                    f"CRS WARNING: {name} is in {sr.name} (EPSG:{sr.factoryCode}), "
+                    f"expected British National Grid (EPSG:27700). Reproject before analysis."
+                )
+
+    if issues:
+        print(f"\n⚠ {len(issues)} ISSUES FOUND:")
+        for issue in issues:
+            print(f"  - {issue}")
+        return False
+    print("\n✓ All datasets loaded and valid")
+    return True
+
+# Call after loading
+validate_data_loaded([
+    "roads", "rail", "rivers", "urban_areas", "woodland",
+    "flood_zone_2", "flood_zone_3", "alc", "priority_habitats",
+    "designated_sites", "dtm_raw", "study_area",
+], GDB)
+```
+
+### After clipping (Step 5)
+```python
+def validate_clip_results(clipped_layers, study_area):
+    """Verify clipped layers have features and fall within study area extent."""
+    study_ext = arcpy.Describe(study_area).extent
+    issues = []
+
+    for layer in clipped_layers:
+        if not arcpy.Exists(layer):
+            issues.append(f"MISSING: {layer} not created by clip")
+            continue
+        count = int(arcpy.management.GetCount(layer)[0])
+        if count == 0:
+            issues.append(
+                f"EMPTY: {layer} has 0 features after clip — "
+                f"the dataset may not overlap with the study area"
+            )
+        else:
+            ext = arcpy.Describe(layer).extent
+            # Check if clipped extent is within study area extent (with tolerance)
+            tol = 10  # meters
+            if (ext.XMin < study_ext.XMin - tol or ext.YMin < study_ext.YMin - tol
+                    or ext.XMax > study_ext.XMax + tol or ext.YMax > study_ext.YMax + tol):
+                issues.append(f"EXTENT: {layer} extends beyond study area — clip may have failed")
+            else:
+                print(f"  OK: {layer} — {count} features, within study area")
+
+    if issues:
+        print(f"\n⚠ {len(issues)} ISSUES:")
+        for i in issues:
+            print(f"  - {i}")
+        return False
+    print("\n✓ All clipped layers valid")
+    return True
+```
+
+### After reclassification (Step 9)
+```python
+def validate_reclassified(raster_name, expected_values={0, 1}):
+    """Verify a reclassified raster contains only expected values (0 and 1)."""
+    r = arcpy.Raster(raster_name)
+    issues = []
+
+    # Check value range
+    if r.minimum is not None and r.maximum is not None:
+        actual_min = int(r.minimum)
+        actual_max = int(r.maximum)
+        actual_values = set(range(actual_min, actual_max + 1))
+        unexpected = actual_values - expected_values
+        if unexpected:
+            issues.append(
+                f"UNEXPECTED VALUES: {raster_name} contains values {unexpected}, "
+                f"expected only {expected_values}"
+            )
+    else:
+        issues.append(f"ALL NODATA: {raster_name} has no valid values — reclassification failed")
+
+    # Check for excessive NODATA
+    desc = arcpy.Describe(raster_name)
+    total_cells = desc.width * desc.height
+    if r.noDataValue is not None:
+        # Count NODATA cells
+        from arcpy.sa import IsNull
+        nodata_count = arcpy.Raster(IsNull(r))
+        # If >50% is NODATA, something is probably wrong
+        pass  # difficult to count exactly without stats; flag as warning
+
+    if not issues:
+        print(f"  OK: {raster_name} — values: {r.minimum} to {r.maximum}")
+    else:
+        for i in issues:
+            print(f"  ⚠ {i}")
+    return len(issues) == 0
+
+# Validate all reclassified layers
+for name, path in exclusion_rasters.items():
+    validate_reclassified(path)
+```
+
+### After final suitability result (Step 10)
+```python
+def validate_suitability_result(result_raster, study_area, cell_size):
+    """Final validation of the suitability output."""
+    r = arcpy.Raster(result_raster)
+    issues = []
+
+    # 1. Check it's binary (0 and 1 only)
+    if r.minimum < 0 or r.maximum > 1:
+        issues.append(f"NOT BINARY: values range from {r.minimum} to {r.maximum}")
+
+    # 2. Check extent matches study area
+    study_ext = arcpy.Describe(study_area).extent
+    raster_ext = arcpy.Describe(result_raster).extent
+    tol = cell_size * 2
+    if abs(raster_ext.XMin - study_ext.XMin) > tol:
+        issues.append(f"EXTENT MISMATCH: raster XMin={raster_ext.XMin:.0f}, study={study_ext.XMin:.0f}")
+
+    # 3. Check cell size
+    desc = arcpy.Describe(result_raster)
+    actual_cell = round(desc.meanCellWidth, 2)
+    if actual_cell != cell_size:
+        issues.append(f"CELL SIZE: expected {cell_size}m, got {actual_cell}m")
+
+    # 4. Check CRS
+    sr = desc.spatialReference
+    if sr.factoryCode != 27700:
+        issues.append(f"CRS: expected BNG (27700), got {sr.name} ({sr.factoryCode})")
+
+    # 5. Report statistics
+    with arcpy.da.SearchCursor(result_raster, ["VALUE", "COUNT"]) as cursor:
+        stats = {row[0]: row[1] for row in cursor}
+    suitable = stats.get(1, 0)
+    unsuitable = stats.get(0, 0)
+    total = suitable + unsuitable
+    pct = (suitable / total * 100) if total > 0 else 0
+    area_ha = suitable * cell_size * cell_size / 10000
+
+    if suitable == 0:
+        issues.append("NO SUITABLE LAND FOUND — check reclassification criteria")
+    if pct > 95:
+        issues.append(f"SUSPICIOUS: {pct:.0f}% suitable — constraints may not be applied correctly")
+
+    print(f"\nSuitability Result: {result_raster}")
+    print(f"  Suitable:   {suitable:>10,} cells  ({pct:.1f}%)  = {area_ha:.1f} ha")
+    print(f"  Unsuitable: {unsuitable:>10,} cells  ({100-pct:.1f}%)")
+    print(f"  Cell size: {actual_cell}m  |  CRS: {sr.name}")
+
+    if issues:
+        print(f"\n  ⚠ {len(issues)} ISSUES:")
+        for i in issues:
+            print(f"    - {i}")
+    else:
+        print(f"\n  ✓ Result looks good")
+
+    return len(issues) == 0
+```
+
+---
+
+## Decision Points — When to Stop and Ask the User
+
+Claude Code should NOT make every decision automatically. At these critical
+points, STOP and ASK the user before proceeding.
+
+### When to ask
+
+| Decision Point | What to Ask | Why |
+|----------------|-------------|-----|
+| **Study area definition** | "How should I define the study area? Do you have a boundary shapefile, coordinates, or should I create one from a place name?" | The entire analysis depends on this boundary |
+| **Buffer distances** | "The brief says buffer roads. What distances? e.g., 25m for minor roads, 50m for motorways?" | Wrong distances = wrong results |
+| **Road classification split** | "I found these road classes in your data: [list]. Which should get the larger buffer?" | Field names vary between datasets |
+| **Reclassification thresholds** | "What slope is too steep? (common: 10°, 15°, 20°)" | Depends on the land use being assessed |
+| **ALC grades to exclude** | "Which Agricultural Land grades should be protected? (typical: Grades 1, 2, 3a)" | Policy decision, not technical |
+| **NODATA interpretation** | "Areas with no flood zone data — should I treat those as suitable (no flood risk) or flag them for manual review?" | Absence of data ≠ absence of risk |
+| **Minimum patch size** | "What's the minimum area for a suitable patch? (e.g., 0.5 ha, 1 ha, 5 ha)" | Depends on what's being sited |
+| **Map layout** | "I'll create 3 maps. Map 1: overview, Map 2: constraints, Map 3: result. Does this match your brief?" | Brief may specify different maps |
+| **Symbology colours** | "For the suitability result: green = suitable, red = unsuitable. Are these the right colours for your brief?" | Some briefs specify colour schemes |
+| **Output format** | "Export as JPEG at 300dpi on A4 landscape? Or does the brief specify something different?" | Don't assume |
+
+### How to ask (patterns for Claude Code)
+
+When you hit a decision point, present it clearly:
+
+```
+I need your input before proceeding:
+
+**Buffer distances for roads**
+I found these road classes in your data:
+  - Motorway (234 features)
+  - A Road (1,205 features)
+  - B Road (892 features)
+  - Minor Road (3,456 features)
+
+Common approaches:
+  1. Motorway: 50m, A Road: 50m, B Road: 25m, Minor: 25m
+  2. All roads: 25m (simpler)
+  3. Custom distances — tell me what you need
+
+Which approach, or what distances do you want?
+```
+
+### How to present choices from the data
+
+When a decision depends on the actual data content, show the user what's there:
+
+```python
+# Before asking about ALC reclassification, show them the grades present:
+grades = sorted({row[0] for row in
+    arcpy.da.SearchCursor("alc_clip", ["ALC_GRADE"]) if row[0]})
+counts = {}
+with arcpy.da.SearchCursor("alc_clip", ["ALC_GRADE"]) as cursor:
+    for row in cursor:
+        counts[row[0]] = counts.get(row[0], 0) + 1
+
+print("ALC Grades in your study area:")
+for grade in grades:
+    print(f"  {grade}: {counts[grade]} features")
+# Then ask: "Which grades should be protected (unsuitable)?"
+```
+
+### Decision log — record what was decided
+
+After each decision, write it to the project notes:
+
+```python
+def log_decision(project_dir, decision, choice, reason=""):
+    """Append a decision to the project NOTES.md file."""
+    import datetime
+    notes_path = os.path.join(project_dir, "NOTES.md")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry = f"\n### Decision: {decision} ({timestamp})\n"
+    entry += f"**Choice:** {choice}\n"
+    if reason:
+        entry += f"**Reason:** {reason}\n"
+    with open(notes_path, "a") as f:
+        f.write(entry)
+    print(f"Decision logged: {decision} → {choice}")
+
+# Example usage after user decides buffer distances:
+log_decision(
+    PROJECT_DIR,
+    "Road buffer distances",
+    "Motorway: 50m, A Road: 50m, B Road: 25m, Minor Road: 25m",
+    "Per assignment brief Section 3.2"
+)
+```
+
+---
+
+## Visual Review & Feedback Loop
+
+Claude Code runs in a terminal and cannot display maps directly. But there
+are effective ways to let the user see and review map outputs, then make
+adjustments based on their feedback.
+
+### Export quick previews for user review
+```python
+def export_preview(aprx_or_layout, output_path, resolution=72):
+    """Export a quick low-res preview for the user to check.
+
+    72 dpi = small file, fast export, good enough to spot layout issues.
+    Final export uses 300 dpi.
+    """
+    if isinstance(aprx_or_layout, str):
+        # It's a layout name — find it
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        layout = aprx.listLayouts(aprx_or_layout)[0]
+    else:
+        layout = aprx_or_layout
+
+    layout.exportToJPEG(output_path, resolution=resolution, jpeg_quality=80)
+    size_kb = os.path.getsize(output_path) / 1024
+    print(f"Preview exported: {output_path} ({size_kb:.0f} KB)")
+    print(f"Open this file and tell me what needs changing.")
+    return output_path
+
+# After setting up a layout, export preview and ask user to review:
+preview = export_preview(layout, r"C:\Projects\preview_map1.jpg")
+```
+
+### Report what's on the layout (so user can direct changes)
+```python
+def describe_layout(layout):
+    """Describe every element on the layout with positions and sizes.
+
+    Present this to the user so they can say things like
+    'move the legend to the bottom-right' or 'make the title bigger'.
+    """
+    print(f"\nLayout: '{layout.name}' ({layout.pageWidth}x{layout.pageHeight} {layout.pageUnits})")
+    print("-" * 70)
+
+    for elm in layout.listElements():
+        elm_type = elm.type
+        name = elm.name
+
+        # Position and size
+        x = round(elm.elementPositionX, 1)
+        y = round(elm.elementPositionY, 1)
+        w = round(elm.elementWidth, 1)
+        h = round(elm.elementHeight, 1)
+
+        print(f"  [{elm_type}] '{name}'")
+        print(f"    Position: ({x}, {y})  Size: {w} x {h} cm")
+
+        if elm_type == "TEXT_ELEMENT":
+            print(f"    Text: '{elm.text}'")
+            print(f"    Font size: {elm.textSize} pt")
+        elif elm_type == "MAPFRAME_ELEMENT":
+            print(f"    Map: {elm.map.name if elm.map else 'None'}")
+            print(f"    Scale: 1:{elm.camera.scale:,.0f}")
+            ext = elm.camera.getExtent()
+            print(f"    Extent: ({ext.XMin:.0f}, {ext.YMin:.0f}) to ({ext.XMax:.0f}, {ext.YMax:.0f})")
+        elif elm_type == "LEGEND_ELEMENT":
+            print(f"    Items: {len(elm.items)}")
+
+    print(f"\nTell me what to change — e.g.:")
+    print(f"  'Move the legend to bottom-right'")
+    print(f"  'Make the title bigger'")
+    print(f"  'The scale bar is overlapping the map'")
+    print(f"  'Change the north arrow to a different style'")
+
+describe_layout(layout)
+```
+
+### Handle user feedback about layout
+
+When the user says things like "move the legend", "make the title bigger",
+"this doesn't look right", translate their feedback into arcpy.mp calls:
+
+```python
+# Common user feedback and how to handle it:
+
+# "Move the legend to the bottom-right"
+legend = layout.listElements("LEGEND_ELEMENT", "Legend")[0]
+legend.elementPositionX = 22.0  # right side of A4 landscape
+legend.elementPositionY = 3.0   # near bottom
+
+# "Make the title bigger"
+title = layout.listElements("TEXT_ELEMENT", "Title")[0]
+cim = title.getDefinition("V3")
+cim.textSymbol.symbol.height = 20  # increase from e.g. 14 to 20
+title.setDefinition(cim)
+
+# "The scale bar overlaps the map frame"
+scale_bar = layout.listElements("SCALE_BAR_ELEMENT")[0]
+map_frame = layout.listElements("MAPFRAME_ELEMENT")[0]
+# Move scale bar below the map frame
+scale_bar.elementPositionY = map_frame.elementPositionY - 1.5
+
+# "Add more space between the two map frames"
+left_frame = layout.listElements("MAPFRAME_ELEMENT", "Left Detail")[0]
+right_frame = layout.listElements("MAPFRAME_ELEMENT", "Right Detail")[0]
+left_frame.elementWidth = 12.0  # shrink left
+right_frame.elementPositionX = 15.5  # move right further over
+
+# "Change the map extent to show more area"
+mf = layout.listElements("MAPFRAME_ELEMENT", "Main Map Frame")[0]
+ext = mf.camera.getExtent()
+# Expand by 20%
+buffer_x = (ext.XMax - ext.XMin) * 0.1
+buffer_y = (ext.YMax - ext.YMin) * 0.1
+new_ext = arcpy.Extent(
+    ext.XMin - buffer_x, ext.YMin - buffer_y,
+    ext.XMax + buffer_x, ext.YMax + buffer_y,
+)
+mf.camera.setExtent(new_ext)
+
+# "The colours are wrong / I want different colours"
+# → Re-run the symbology section with new colours
+
+# "This layer shouldn't be visible"
+lyr = mf.map.listLayers("urban_areas")[0]
+lyr.visible = False
+
+# After ANY change: re-export preview and show to user
+export_preview(layout, r"C:\Projects\preview_updated.jpg")
+```
+
+### Handle user feedback about analysis results
+
+When the user says "the results don't look right" or "too much/too little
+is marked as suitable":
+
+```python
+# Common analysis feedback and responses:
+
+# "Too much area is suitable — something's missing"
+# → Check which constraint layers are active:
+print("Active constraint layers:")
+for name, path in exclusion_rasters.items():
+    r = arcpy.Raster(path)
+    zeros = sum(1 for row in arcpy.da.SearchCursor(path, ["VALUE"])
+                if row[0] == 0)
+    print(f"  {name}: {zeros} cells excluded")
+# Show which layer excludes the most / least
+
+# "Nothing is suitable"
+# → One reclassified layer is probably all-zero. Check each:
+print("Checking each layer for all-zero issues:")
+for name, path in exclusion_rasters.items():
+    r = arcpy.Raster(path)
+    if r.maximum == 0:
+        print(f"  ⚠ {name}: ALL UNSUITABLE (max=0) — this kills the entire result!")
+        print(f"    Check the reclassification criteria for this layer")
+
+# "The suitable areas are in the wrong place"
+# → Export each individual reclassified layer as a separate preview
+# so the user can see which constraint is causing the issue
+
+# "The buffer distance is wrong, change it to 100m"
+# → Re-run just the buffer step with new distance, then re-run
+# PolygonToRaster, Reclassify, and Raster Calculator from that point
+```
+
+### Screenshot review — user sends a picture
+
+Claude Code is multimodal. If the user takes a screenshot of their map in
+ArcGIS Pro and sends it, Claude can SEE the image and give specific feedback:
+
+```
+User: [pastes screenshot of their map layout]
+Claude: I can see your Map 1 layout. A few observations:
+  1. The legend is overlapping the map frame on the right side — I'll move
+     it to position (23, 8) to give it more space
+  2. The title text looks too small — I'll increase it from 12pt to 16pt
+  3. The north arrow is in the bottom-left which is unconventional — most
+     maps put it in the top-left or top-right
+  4. I can see the study area boundary but the basemap isn't visible —
+     the basemap layer might be turned off
+
+Want me to fix all of these, or just specific ones?
+```
+
+### The review loop workflow
+
+For map production, always follow this loop:
+
+```
+1. Generate layout with script
+2. Export low-res preview (72 dpi)
+3. Tell user: "Preview saved to [path]. Please open it and tell me
+   what needs changing."
+4. Wait for user feedback
+5. Make adjustments based on feedback
+6. Export new preview
+7. Repeat until user says it looks good
+8. Export final version at 300 dpi
+```
+
+For analysis results:
+
+```
+1. Run analysis step
+2. Run validation checkpoint
+3. Present results with statistics
+4. Ask: "Does this look right? [X] cells suitable ([Y]%). Expected?"
+5. If user says no: ask what's wrong, diagnose, re-run
+6. If user says yes: proceed to next step
+```
+
+---
+
+## Putting It All Together — The Interactive Workflow
+
+When helping a user through a complete suitability analysis, the interaction
+should follow this pattern. Claude Code should NOT silently run all 12 steps.
+Instead, pause at checkpoints and decision points.
+
+```
+PHASE 1: SETUP
+  [1] Find ArcGIS Pro, scan USB/folder for data
+  [2] Match data to brief → show FOUND/MISSING table
+  ● ASK: "I found 8 of 12 datasets. You're missing [X, Y, Z].
+    Should I proceed with what we have, or do you need to download
+    the missing ones first?"
+
+PHASE 2: DATA PREPARATION
+  [3] Load data into geodatabase
+  → VALIDATE: all datasets loaded, CRS correct
+  [4] Merge multi-tile data
+  [5] Clip to study area
+  → VALIDATE: all clips have features
+  ● ASK if any clips are empty: "The flood zone clip is empty —
+    there may be no flood zones in your study area. Is that expected?"
+
+PHASE 3: ANALYSIS (decision-heavy)
+  [6] Buffer
+  ● ASK: "What buffer distances? Here are the road classes I found: [...]"
+  → VALIDATE: buffer features created
+  [7] Slope
+  ● ASK: "What slope threshold? 10°? 15°? 20°?"
+  [8] Polygon to Raster
+  → VALIDATE: all rasters aligned (check_raster_alignment)
+  [9] Reclassify
+  ● ASK: "For ALC, which grades to protect? I found these in your data: [...]"
+  ● ASK: "How should I handle NODATA in flood zones?"
+  → VALIDATE: all binary (0/1), no unexpected values
+  [10] Raster Calculator
+  → VALIDATE: result is binary, suitable % is reasonable
+  ● REPORT: "Result: X% suitable (Y hectares). Does this seem right?"
+
+PHASE 4: RESULTS
+  [11] Identify patches
+  ● ASK: "What minimum patch size? 0.5 ha? 1 ha?"
+  → REPORT: "Found N suitable patches, largest is X ha, smallest Y ha"
+
+PHASE 5: MAP PRODUCTION (iterative)
+  [12] Create maps
+  → EXPORT preview (72 dpi)
+  ● ASK: "Preview saved. Open it and tell me what to change."
+  → Adjust based on feedback
+  → EXPORT new preview
+  → Repeat until approved
+  → EXPORT final (300 dpi)
+```
