@@ -85,6 +85,11 @@ python orchestrator.py run output/my-api
 
 # See what plugins are loaded
 python orchestrator.py plugins
+
+# Skill pack management
+python orchestrator.py new-skill my-domain      # scaffold a new pack
+python orchestrator.py install-skill arcgis      # install into Claude Code
+python orchestrator.py list-packs                # show available packs
 ```
 
 ### From Python (as a library)
@@ -172,6 +177,64 @@ npm install -g patchwork-audit
 No configuration needed. If Patchwork isn't installed, the plugin silently
 disables itself.
 
+## Skill Packs
+
+Skill packs give AI coding agents domain expertise. A pack is a self-contained
+directory with a knowledge base (CONTEXT.md), slash commands (SKILL.md files),
+and a manifest — when installed, Claude Code picks them up as `/slash-commands`
+automatically.
+
+```
+packs/<name>/
+    skill.json              # manifest (name, version, capabilities)
+    CONTEXT.md              # domain knowledge (APIs, patterns, gotchas)
+    skills/<name>/SKILL.md  # one or more slash commands
+    hooks.py                # optional guardrail hooks
+```
+
+### Managing skill packs
+
+```bash
+# Create a new skill pack from a scaffold
+python orchestrator.py new-skill my-domain
+
+# Install a pack into Claude Code (copies to .claude/skills/)
+python orchestrator.py install-skill arcgis
+
+# List all available packs
+python orchestrator.py list-packs
+```
+
+### Shipped pack: ArcGIS Pro
+
+The first full skill pack covers ArcGIS Pro and arcpy — geospatial analysis,
+mapping, geodatabases, and professional map production. Five slash commands:
+
+| Command | What it does |
+|---------|-------------|
+| `/arcgis` | General arcpy help — spatial analysis, geoprocessing, raster, network analyst |
+| `/arcgis-project` | Project management — .aprx structure, maps, layouts, sharing |
+| `/arcgis-ingest` | Data ingestion — CSVs, shapefiles, GPX, georeferencing, schema mapping |
+| `/arcgis-discover` | Data discovery — scan folders/USBs, match datasets to a project brief |
+| `/arcgis-setup` | Environment setup — find ArcGIS Pro install, validate arcpy, configure conda |
+
+Backed by a 5,600+ line CONTEXT.md covering: site suitability analysis,
+UK planning workflows, hydrology, 3D analyst, LiDAR, time-series animation,
+web GIS / Portal administration, multi-criteria analysis, symbology,
+colour palettes, layout automation, and common arcpy gotchas.
+
+### Building your own pack
+
+Use the scaffolding system:
+
+```bash
+python orchestrator.py new-skill terraform
+```
+
+This creates `packs/terraform/` with template files ready to fill in. See
+`scaffolds/` for the templates. The manifest (`skill.json`) declares the pack's
+capabilities so tools can filter and discover packs programmatically.
+
 ## Supported stacks
 
 | Stack | Detection | Dependency install | Build |
@@ -235,7 +298,7 @@ python setup.py
 ## Project structure
 
 ```
-orchestrator.py          Core API: generate_plan(), execute_plan(), run_project()
+orchestrator.py          Core API + CLI: generate, execute, run, new-skill, install-skill
 config.py                Configuration management
 cloud_agent/
   cloud_client.py        LLM integration (plan generation, caching, retry)
@@ -244,12 +307,23 @@ runtime/
 plugins/
   __init__.py            Plugin system (PluginManager, hook lifecycle)
   patchwork_audit.py     Patchwork/codex-audit integration
+packs/                   Skill packs (domain knowledge for AI agents)
+  arcgis/
+    skill.json           Pack manifest
+    CONTEXT.md           5,600+ line knowledge base
+    skills/              Slash commands (arcgis, arcgis-project, etc.)
+    projects/            Project templates and briefs
+scaffolds/               Templates for generating new skill packs
+  CONTEXT.md.tpl
+  SKILL.md.tpl
+  skill.json.tpl
+  plugin.py.tpl
 utils/
   runner.py              Command execution with JSONL logging
   helper.py              Slugify, safe path joining, run script creation
   backup.py              Project backup snapshots
 tests/
-  test_orchestrator.py   Unit tests (config, plan parsing, plugins)
+  test_orchestrator.py   Unit tests (config, plan parsing, plugins, skill packs)
   test_integration_minimal.py  Integration test (full plan -> build)
 ```
 

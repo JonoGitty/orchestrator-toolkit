@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.3.0 — Skill Pack System + ArcGIS Domain Pack
+
+New skill pack architecture that gives AI coding agents domain expertise via
+installable knowledge packs.
+
+### Added
+- **Skill pack system** — self-contained packs with CONTEXT.md, SKILL.md slash
+  commands, and a skill.json manifest
+- **Scaffolding** — `new-skill` command generates a pack from templates
+- **Pack management CLI** — `install-skill`, `list-packs` commands
+- **ArcGIS Pro skill pack** (v0.5.0) — full geospatial domain pack:
+  - 5,600+ line CONTEXT.md covering arcpy, spatial analysis, geoprocessing,
+    raster, network analyst, spatial statistics, geocoding
+  - UK planning & site suitability workflows (multi-criteria analysis,
+    PolygonToRaster, Reclassify, weighted overlay)
+  - Hydrology, 3D Analyst, LiDAR, time-series animation
+  - Web GIS, Portal administration, hosted feature services
+  - Symbology engine, colour palettes, layer visibility
+  - Layout automation and professional map production
+  - Project templates with BRIEF.md, DATASETS.md, PARAMETERS.md
+  - 5 slash commands: /arcgis, /arcgis-project, /arcgis-ingest,
+    /arcgis-discover, /arcgis-setup
+- **Claude Code integration** — CLAUDE.md project instructions, .claude/skills/
+  directory, settings.json with tool permissions
+- **Plugin scaffolding** — `new-skill` also generates plugin templates with tests
+
+### Changed
+- README rewritten with skill pack documentation
+- Test suite expanded with skill pack and scaffolding tests
+- .gitignore updated for skill pack development
+
 ## v0.2.0 — Middleware Refactor
 
 Major refactor: stripped down from a monolithic app-builder/system-controller
