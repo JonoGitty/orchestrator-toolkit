@@ -604,6 +604,40 @@ class TestArcGISPack:
         assert "ASK" in context
         assert "VALIDATE" in context
 
+    def test_context_has_smart_dataset_selection(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "select_datasets_for_brief" in context
+        assert "ESSENTIAL" in context
+        assert "OPTIONAL" in context
+        assert "DATASET_REQUIREMENTS" in context
+        assert "analysis_types" in context
+
+    def test_context_has_symbology_engine(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "choose_symbology" in context
+        assert "apply_symbology_to_all_layers" in context
+        assert "GIS_COLOUR_PALETTES" in context
+        assert "RasterStretchColorizer" in context
+        assert "UniqueValueRenderer" in context
+
+    def test_context_has_colour_palette_library(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "suitable_unsuitable" in context
+        assert "flood_zone" in context
+        assert "alc_grade1" in context
+        assert "alc_grade5" in context
+        assert "study_area" in context
+        assert "Elevation #1" in context
+
+    def test_context_has_layer_visibility_profiles(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "MAP_LAYER_PROFILES" in context
+        assert "set_layer_visibility" in context
+        assert "setup_maps_for_report" in context
+        assert '"overview"' in context
+        assert '"constraints"' in context
+        assert '"result"' in context
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

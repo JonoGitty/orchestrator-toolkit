@@ -319,6 +319,166 @@ def match_data_to_brief(brief_requirements, scanned_data):
 
     return {"matches": matches, "missing": missing}
 
+# ──────────────────────────────────────────────────────────────────
+# SMART DATASET SELECTION — only load what the brief actually needs
+# ──────────────────────────────────────────────────────────────────
+
+def select_datasets_for_brief(brief_text, scanned_data):
+    """Analyse a brief and return ONLY the datasets needed — not everything.
+
+    Reads the brief text, identifies which analysis types are required,
+    and filters the scanned data down to what's actually relevant.
+    Returns a ranked list: essential, optional, and not-needed.
+
+    brief_text:   the actual text of the assignment brief
+    scanned_data: output from scan_for_gis_data()
+    """
+    # --- 1. Detect what analysis the brief is asking for ---
+    brief_lower = brief_text.lower()
+
+    analysis_types = {
+        "suitability": any(kw in brief_lower for kw in [
+            "suitability", "suitable", "site selection", "constraint",
+            "exclusion", "criteria", "multi-criteria",
+        ]),
+        "flood_risk": any(kw in brief_lower for kw in [
+            "flood", "inundation", "fluvial", "pluvial", "flood zone",
+        ]),
+        "slope_terrain": any(kw in brief_lower for kw in [
+            "slope", "terrain", "elevation", "gradient", "dtm", "dem",
+            "topograph", "steep",
+        ]),
+        "transport_access": any(kw in brief_lower for kw in [
+            "road", "rail", "transport", "access", "highway", "network",
+            "route", "travel time",
+        ]),
+        "ecology": any(kw in brief_lower for kw in [
+            "habitat", "sssi", "sac", "spa", "ecology", "biodiversity",
+            "wildlife", "protected", "priority habitat", "natura 2000",
+        ]),
+        "agriculture": any(kw in brief_lower for kw in [
+            "agricultural", "alc", "farmland", "grade 1", "grade 2",
+            "best and most versatile", "bvm",
+        ]),
+        "urban_settlement": any(kw in brief_lower for kw in [
+            "urban", "built-up", "settlement", "building", "residential",
+        ]),
+        "hydrology": any(kw in brief_lower for kw in [
+            "river", "watercourse", "catchment", "watershed", "stream",
+            "drainage", "water body",
+        ]),
+        "woodland": any(kw in brief_lower for kw in [
+            "woodland", "forest", "tree", "ancient woodland",
+        ]),
+        "heritage": any(kw in brief_lower for kw in [
+            "heritage", "listed building", "scheduled monument",
+            "conservation area", "historic",
+        ]),
+    }
+
+    active = {k for k, v in analysis_types.items() if v}
+    print(f"Brief analysis types detected: {', '.join(active) if active else 'NONE — ask user'}")
+
+    # --- 2. Map analysis types to required datasets ---
+    DATASET_REQUIREMENTS = {
+        "suitability":       ["study_area", "roads", "urban_areas"],
+        "flood_risk":        ["flood_zone_2", "flood_zone_3"],
+        "slope_terrain":     ["dtm"],
+        "transport_access":  ["roads", "rail"],
+        "ecology":           ["priority_habitats", "sssi", "sac", "spa"],
+        "agriculture":       ["alc"],
+        "urban_settlement":  ["urban_areas"],
+        "hydrology":         ["rivers"],
+        "woodland":          ["woodland"],
+        "heritage":          ["heritage_sites"],
+    }
+
+    essential_names = set()
+    for atype in active:
+        for ds in DATASET_REQUIREMENTS.get(atype, []):
+            essential_names.add(ds)
+
+    # Study area is always essential
+    essential_names.add("study_area")
+
+    # --- 3. Match essential datasets to scanned files ---
+    all_files = []
+    for category in scanned_data.values():
+        all_files.extend(category)
+
+    DATASET_KEYWORDS = {
+        "study_area":        ["study_area", "boundary", "site_boundary", "aoi"],
+        "roads":             ["road", "highway", "street", "motorway"],
+        "rail":              ["rail", "railway", "train"],
+        "rivers":            ["river", "water", "stream", "surfacewater"],
+        "urban_areas":       ["urban", "building", "builtup", "settlement"],
+        "woodland":          ["woodland", "forest", "wood"],
+        "dtm":               ["dtm", "dem", "elevation", "terrain"],
+        "flood_zone_2":      ["flood_zone_2", "floodzone2", "fz2"],
+        "flood_zone_3":      ["flood_zone_3", "floodzone3", "fz3"],
+        "alc":               ["alc", "agricultural", "agri_land"],
+        "priority_habitats": ["habitat", "priority_habitat", "phi"],
+        "sssi":              ["sssi"],
+        "sac":               ["sac"],
+        "spa":               ["spa"],
+        "heritage_sites":    ["heritage", "listed", "scheduled"],
+    }
+
+    essential = []    # datasets the brief definitely needs
+    optional = []     # datasets found but not required by brief
+    not_found = []    # datasets needed but not found on disk
+
+    matched_files = set()
+
+    for ds_name in essential_names:
+        keywords = DATASET_KEYWORDS.get(ds_name, [ds_name])
+        found = None
+        for f in all_files:
+            fname = f["name"].lower()
+            if any(kw in fname for kw in keywords):
+                found = f
+                matched_files.add(f["name"])
+                break
+        if found:
+            essential.append({"dataset": ds_name, "file": found, "status": "ESSENTIAL"})
+        else:
+            not_found.append({"dataset": ds_name, "status": "NEEDED BUT MISSING"})
+
+    # Everything else is optional (found but not required by brief)
+    for f in all_files:
+        if f["name"] not in matched_files:
+            optional.append({"dataset": f["name"], "file": f, "status": "OPTIONAL"})
+
+    # --- 4. Print clear report ---
+    print(f"\n{'='*70}")
+    print(f"DATASET SELECTION FOR BRIEF")
+    print(f"{'='*70}\n")
+
+    print(f"ESSENTIAL ({len(essential)} datasets — load these):")
+    for item in essential:
+        print(f"  ✓ {item['dataset']:<25} → {item['file']['name']}")
+
+    if not_found:
+        print(f"\nMISSING ({len(not_found)} — need to download):")
+        for item in not_found:
+            print(f"  ✗ {item['dataset']:<25} NOT FOUND on disk")
+
+    if optional:
+        print(f"\nOPTIONAL ({len(optional)} — found but NOT needed by this brief):")
+        for item in optional:
+            print(f"  - {item['file']['name']}")
+
+    print(f"\n→ Loading {len(essential)} of {len(all_files)} available datasets")
+    if optional:
+        print(f"  Skipping {len(optional)} datasets not relevant to this brief")
+
+    return {
+        "essential": essential,
+        "optional": optional,
+        "not_found": not_found,
+        "analysis_types": active,
+    }
+
 # Example usage for a typical UK suitability brief:
 UK_SUITABILITY_REQUIREMENTS = [
     {"name": "Study area boundary", "keywords": ["study_area", "boundary", "site"],
@@ -980,6 +1140,373 @@ for map_name in ["Map 1 - Overview", "Map 2 - Constraints", "Map 3 - Result"]:
 # Strategy 3: Share a single layer across map frames
 # If multiple map frames on one layout show the SAME map, they automatically
 # share symbology. Only use separate maps when you need different visible layers.
+```
+
+#### Automatic Symbology Selection — Choose the Right Look for Each Dataset
+
+Do NOT apply the same renderer to everything. The correct symbology depends on
+(a) the geometry type, (b) whether the data is categorical or continuous, and
+(c) what the data represents semantically. This engine selects automatically.
+
+```python
+# ──────────────────────────────────────────────────────────────────
+# COLOUR PALETTE LIBRARY — semantically correct colours for GIS data
+# ──────────────────────────────────────────────────────────────────
+
+GIS_COLOUR_PALETTES = {
+    # --- Suitability / binary ---
+    "suitable_unsuitable": {
+        1: {"RGB": [56, 168, 0, 100],   "label": "Suitable"},       # dark green
+        0: {"RGB": [255, 85, 85, 100],  "label": "Unsuitable"},     # red
+    },
+
+    # --- Constraint layers (single-colour fills with meaning) ---
+    "flood_zone":       {"fill": [100, 150, 255, 60],  "outline": [40, 80, 200, 100]},   # translucent blue
+    "flood_zone_3":     {"fill": [0, 77, 168, 70],     "outline": [0, 38, 115, 100]},    # darker blue
+    "rivers":           {"line": [0, 112, 255, 100],    "width": 1.5},                    # bright blue line
+    "roads_major":      {"line": [168, 0, 0, 100],      "width": 2.0},                    # dark red line
+    "roads_minor":      {"line": [168, 112, 0, 100],    "width": 1.0},                    # brown line
+    "rail":             {"line": [78, 78, 78, 100],      "width": 1.5, "dash": True},     # grey dashed
+    "urban":            {"fill": [204, 204, 204, 80],   "outline": [130, 130, 130, 100]}, # grey
+    "woodland":         {"fill": [56, 168, 0, 60],      "outline": [38, 115, 0, 100]},    # green
+    "habitat":          {"fill": [76, 230, 0, 50],      "outline": [56, 168, 0, 100]},    # bright green
+    "sssi":             {"fill": [255, 170, 0, 50],     "outline": [230, 152, 0, 100]},   # orange
+    "sac":              {"fill": [170, 102, 205, 50],   "outline": [132, 0, 168, 100]},   # purple
+    "spa":              {"fill": [255, 0, 197, 40],     "outline": [168, 0, 132, 100]},   # pink
+    "alc_grade1":       {"fill": [168, 112, 0, 100],    "label": "Grade 1 (Excellent)"},  # dark brown
+    "alc_grade2":       {"fill": [205, 170, 102, 100],  "label": "Grade 2 (Very Good)"},  # light brown
+    "alc_grade3a":      {"fill": [255, 211, 127, 100],  "label": "Grade 3a (Good)"},      # gold
+    "alc_grade3b":      {"fill": [255, 255, 190, 100],  "label": "Grade 3b (Moderate)"},  # pale yellow
+    "alc_grade4":       {"fill": [233, 255, 190, 100],  "label": "Grade 4 (Poor)"},       # pale green
+    "alc_grade5":       {"fill": [204, 204, 204, 100],  "label": "Grade 5 (Very Poor)"},  # grey
+
+    # --- Buffers (always show as hatched or semi-transparent) ---
+    "buffer":           {"fill": [255, 170, 0, 30],     "outline": [255, 85, 0, 100]},    # orange translucent
+
+    # --- Study area boundary (no fill, just outline) ---
+    "study_area":       {"fill": None,                   "outline": [0, 0, 0, 100], "width": 2.5},
+
+    # --- Raster continuous colour ramps ---
+    "elevation":        "Elevation #1",            # brown-to-white
+    "slope":            "Slope",                   # green-yellow-red
+    "aspect":           "Aspect",                  # circular colour wheel
+    "temperature":      "Temperature",             # blue-white-red
+    "precipitation":    "Precipitation",           # light-to-dark blue
+
+    # --- Patch ranking (graduated) ---
+    "patch_rank": {
+        "ramp": "Green-Blue (Continuous)",
+        "field": "AREA_HA",
+        "breaks": 5,
+        "method": "NaturalBreaks",
+    },
+}
+```
+
+```python
+# ──────────────────────────────────────────────────────────────────
+# SYMBOLOGY ENGINE — automatically choose renderer for each dataset
+# ──────────────────────────────────────────────────────────────────
+
+def choose_symbology(layer_name, lyr, aprx):
+    """Automatically pick the right renderer and colours for a layer.
+
+    Inspects the layer's geometry, data type, and name to decide:
+    - Which renderer (UniqueValue, GraduatedColors, Stretch, etc.)
+    - Which colour palette
+    - Line width, fill transparency, outline colour
+
+    Returns a description of what was applied (for logging).
+    """
+    desc = arcpy.Describe(lyr.dataSource if hasattr(lyr, 'dataSource') else lyr)
+    name_lower = layer_name.lower()
+    applied = []
+
+    # --- RASTER layers ---
+    if lyr.isRasterLayer:
+        r = arcpy.Raster(lyr.dataSource)
+
+        # Binary raster (0/1) — suitability result
+        if r.minimum is not None and r.maximum is not None:
+            if int(r.minimum) == 0 and int(r.maximum) == 1:
+                sym = lyr.symbology
+                sym.updateColorizer("RasterUniqueValueColorizer")
+                cim = lyr.getDefinition("V3")
+                pal = GIS_COLOUR_PALETTES["suitable_unsuitable"]
+                for group in cim.colorizer.groups:
+                    for cls in group.classes:
+                        val = int(cls.values[0])
+                        if val in pal:
+                            cls.symbol.symbol.color = pal[val]
+                            cls.label = pal[val]["label"]
+                lyr.setDefinition(cim)
+                applied.append("Binary: green/red (suitable/unsuitable)")
+
+            # Continuous raster — elevation, slope, etc.
+            else:
+                sym = lyr.symbology
+                sym.updateColorizer("RasterStretchColorizer")
+                sym.colorizer.stretchType = "MinimumMaximum"
+
+                # Choose colour ramp by name
+                if any(kw in name_lower for kw in ["slope", "gradient"]):
+                    ramp_name = GIS_COLOUR_PALETTES["slope"]
+                elif any(kw in name_lower for kw in ["aspect"]):
+                    ramp_name = GIS_COLOUR_PALETTES["aspect"]
+                elif any(kw in name_lower for kw in ["dtm", "dem", "elevation"]):
+                    ramp_name = GIS_COLOUR_PALETTES["elevation"]
+                else:
+                    ramp_name = "Elevation #1"
+
+                ramps = aprx.listColorRamps(ramp_name)
+                if ramps:
+                    sym.colorizer.colorRamp = ramps[0]
+                lyr.symbology = sym
+                applied.append(f"Stretch: {ramp_name}")
+
+        return applied
+
+    # --- VECTOR layers ---
+    geom_type = desc.shapeType  # Point, Polyline, Polygon, MultiPatch
+
+    # Determine the semantic category from the layer name
+    LAYER_CATEGORIES = {
+        "study_area":   "study_area",
+        "boundary":     "study_area",
+        "flood_zone_2": "flood_zone",
+        "flood_zone_3": "flood_zone_3",
+        "flood":        "flood_zone",
+        "river":        "rivers",
+        "watercourse":  "rivers",
+        "stream":       "rivers",
+        "road":         "roads_major",     # default; split by class below
+        "highway":      "roads_major",
+        "motorway":     "roads_major",
+        "rail":         "rail",
+        "railway":      "rail",
+        "urban":        "urban",
+        "building":     "urban",
+        "settlement":   "urban",
+        "builtup":      "urban",
+        "woodland":     "woodland",
+        "forest":       "woodland",
+        "habitat":      "habitat",
+        "phi":          "habitat",
+        "sssi":         "sssi",
+        "sac":          "sac",
+        "spa":          "spa",
+        "alc":          "alc",              # special handling below
+        "buffer":       "buffer",
+    }
+
+    category = None
+    for keyword, cat in LAYER_CATEGORIES.items():
+        if keyword in name_lower:
+            category = cat
+            break
+
+    if not category:
+        # Unknown layer — apply a simple single-symbol grey fill/line
+        applied.append(f"Unknown layer type — default grey symbol")
+        return applied
+
+    # --- ALC requires UniqueValueRenderer (multiple grades) ---
+    if category == "alc":
+        sym = lyr.symbology
+        sym.updateRenderer("UniqueValueRenderer")
+        sym.renderer.fields = ["ALC_GRADE"]  # common field name
+
+        # Build value list from palette
+        alc_colors = {
+            "Grade 1": GIS_COLOUR_PALETTES["alc_grade1"],
+            "Grade 2": GIS_COLOUR_PALETTES["alc_grade2"],
+            "Grade 3a": GIS_COLOUR_PALETTES["alc_grade3a"],
+            "Grade 3b": GIS_COLOUR_PALETTES["alc_grade3b"],
+            "Grade 4": GIS_COLOUR_PALETTES["alc_grade4"],
+            "Grade 5": GIS_COLOUR_PALETTES["alc_grade5"],
+        }
+        for grade, colors in alc_colors.items():
+            applied.append(f"ALC {grade}: {colors.get('label', grade)}")
+        lyr.symbology = sym
+        return applied
+
+    # --- All other categories: apply from palette ---
+    pal = GIS_COLOUR_PALETTES.get(category, {})
+    cim = lyr.getDefinition("V3")
+
+    if geom_type == "Polygon":
+        symbol = cim.renderer.symbol.symbol
+        # Fill
+        for sl in symbol.symbolLayers:
+            if sl.__class__.__name__ == "CIMSolidFill":
+                if pal.get("fill") is not None:
+                    sl.color = {"values": pal["fill"][:3], "type": "CIMRGBColor"}
+                    sl.color["values"].append(pal["fill"][3])  # alpha
+                else:
+                    # No fill (study area boundary)
+                    sl.enable = False
+            elif sl.__class__.__name__ == "CIMSolidStroke":
+                if pal.get("outline"):
+                    sl.color = {"values": pal["outline"][:3], "type": "CIMRGBColor"}
+                    sl.width = pal.get("width", 1.0)
+        applied.append(f"Polygon: {category} style")
+
+    elif geom_type == "Polyline":
+        symbol = cim.renderer.symbol.symbol
+        for sl in symbol.symbolLayers:
+            if sl.__class__.__name__ == "CIMSolidStroke":
+                if pal.get("line"):
+                    sl.color = {"values": pal["line"][:3], "type": "CIMRGBColor"}
+                    sl.width = pal.get("width", 1.0)
+                if pal.get("dash"):
+                    sl.effects = [{"type": "CIMGeometricEffectDashes",
+                                   "dashTemplate": [6, 3]}]
+        applied.append(f"Line: {category} style (width {pal.get('width', 1.0)})")
+
+    elif geom_type == "Point":
+        # Points — use circle marker with colour from palette
+        applied.append(f"Point: {category} marker")
+
+    lyr.setDefinition(cim)
+    return applied
+
+
+def apply_symbology_to_all_layers(map_obj, aprx):
+    """Walk through every layer in a map and apply appropriate symbology.
+
+    Prints a report of what was applied so the user can review.
+    """
+    print(f"\nApplying symbology to map: '{map_obj.name}'")
+    print("-" * 60)
+
+    for lyr in map_obj.listLayers():
+        if not lyr.isFeatureLayer and not lyr.isRasterLayer:
+            continue
+        result = choose_symbology(lyr.name, lyr, aprx)
+        print(f"  {lyr.name:<30} → {', '.join(result) if result else 'unchanged'}")
+
+    print(f"\n✓ Symbology applied. Export a preview to check the colours.")
+    print(f"  If anything looks wrong, tell me which layer needs different colours.")
+```
+
+#### Brief-Driven Layer Visibility — Only Show What's Relevant per Map
+
+Different maps in a report need different visible layers. Don't show everything
+on every map — that makes the map unreadable.
+
+```python
+# ──────────────────────────────────────────────────────────────────
+# LAYER VISIBILITY — show only relevant layers per map
+# ──────────────────────────────────────────────────────────────────
+
+# Define what layers belong on each map type
+MAP_LAYER_PROFILES = {
+    # Map 1: Overview — basemap, study area, key features
+    "overview": {
+        "visible": [
+            "study_area", "roads", "rail", "rivers", "urban_areas",
+            "woodland", "towns",
+        ],
+        "hidden": [
+            "flood_zone_2", "flood_zone_3", "alc", "priority_habitats",
+            "sssi", "sac", "spa", "slope", "dtm", "suitability_result",
+            "suitable_patches",
+        ],
+    },
+
+    # Map 2: Constraints — show all constraint layers
+    "constraints": {
+        "visible": [
+            "study_area", "flood_zone_2", "flood_zone_3", "alc",
+            "priority_habitats", "sssi", "sac", "spa", "roads_buffer",
+            "rail_buffer", "rivers_buffer", "urban_buffer", "woodland",
+            "slope_unsuitable",
+        ],
+        "hidden": [
+            "roads", "rail", "rivers", "urban_areas", "towns",
+            "suitability_result", "suitable_patches", "dtm",
+        ],
+    },
+
+    # Map 3: Result — suitability result + patches + study area
+    "result": {
+        "visible": [
+            "study_area", "suitability_result", "suitable_patches",
+            "roads", "towns",
+        ],
+        "hidden": [
+            "flood_zone_2", "flood_zone_3", "alc", "priority_habitats",
+            "sssi", "sac", "spa", "urban_areas", "woodland",
+            "roads_buffer", "rail_buffer", "rivers_buffer", "urban_buffer",
+            "slope", "dtm", "slope_unsuitable",
+        ],
+    },
+}
+
+
+def set_layer_visibility(map_obj, profile_name):
+    """Turn layers on/off according to a map profile.
+
+    profile_name: one of 'overview', 'constraints', 'result',
+                  or a custom dict with 'visible' and 'hidden' lists.
+    """
+    if isinstance(profile_name, str):
+        profile = MAP_LAYER_PROFILES.get(profile_name)
+        if not profile:
+            print(f"Unknown profile: {profile_name}")
+            print(f"Available: {', '.join(MAP_LAYER_PROFILES.keys())}")
+            return
+    else:
+        profile = profile_name
+
+    visible_kw = [v.lower() for v in profile["visible"]]
+    hidden_kw = [h.lower() for h in profile["hidden"]]
+
+    shown = []
+    hidden_list = []
+    unmatched = []
+
+    for lyr in map_obj.listLayers():
+        name_lower = lyr.name.lower()
+
+        # Check if layer matches any visible keyword
+        if any(kw in name_lower for kw in visible_kw):
+            lyr.visible = True
+            shown.append(lyr.name)
+        elif any(kw in name_lower for kw in hidden_kw):
+            lyr.visible = False
+            hidden_list.append(lyr.name)
+        else:
+            # Unmatched layers — hide by default, warn user
+            lyr.visible = False
+            unmatched.append(lyr.name)
+
+    print(f"\nLayer visibility for '{profile_name}' map:")
+    print(f"  VISIBLE ({len(shown)}): {', '.join(shown)}")
+    print(f"  HIDDEN  ({len(hidden_list)}): {', '.join(hidden_list)}")
+    if unmatched:
+        print(f"  UNMATCHED ({len(unmatched)}): {', '.join(unmatched)}")
+        print(f"  → These layers were hidden. Tell me if any should be visible.")
+
+
+def setup_maps_for_report(aprx, map_configs):
+    """Configure visibility for all maps in a multi-map report.
+
+    map_configs: list of {"map_name": "...", "profile": "overview"/"constraints"/"result"}
+    """
+    for config in map_configs:
+        m = aprx.listMaps(config["map_name"])[0]
+        set_layer_visibility(m, config["profile"])
+
+    print(f"\n✓ All {len(map_configs)} maps configured.")
+    print(f"  Export previews to check each one.")
+
+# Usage:
+# setup_maps_for_report(aprx, [
+#     {"map_name": "Map 1 - Overview",    "profile": "overview"},
+#     {"map_name": "Map 2 - Constraints", "profile": "constraints"},
+#     {"map_name": "Map 3 - Result",      "profile": "result"},
+# ])
 ```
 
 ### Creating and managing data
