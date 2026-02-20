@@ -1,15 +1,16 @@
 {
   "name": "arcgis",
-  "version": "0.4.0",
-  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, data discovery, web GIS, UK planning, site suitability, and professional map production",
+  "version": "0.5.0",
+  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, data discovery, environment setup, web GIS, UK planning, site suitability, and professional map production",
   "author": "OpenClaw Community",
   "dependencies": [],
-  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management", "data-discovery", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis", "portal-admin", "site-suitability", "uk-planning", "layout-automation", "map-production", "polygon-to-raster", "reclassify", "multi-criteria-analysis"],
+  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management", "data-discovery", "environment-detection", "data-scanning", "brief-matching", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis", "portal-admin", "site-suitability", "uk-planning", "layout-automation", "map-production", "polygon-to-raster", "reclassify", "multi-criteria-analysis"],
   "skills": [
     "skills/arcgis",
     "skills/arcgis-project",
     "skills/arcgis-ingest",
-    "skills/arcgis-discover"
+    "skills/arcgis-discover",
+    "skills/arcgis-setup"
   ],
   "context_files": [
     "CONTEXT.md"

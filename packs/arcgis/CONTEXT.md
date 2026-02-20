@@ -13,6 +13,382 @@ spatial analysis, map automation, and data management.
 Key concepts: feature classes, rasters, geodatabases, spatial references,
 map documents (`.aprx`), layouts, and geoprocessing tools.
 
+## Environment Detection & Setup
+
+How to find ArcGIS Pro on the user's machine, locate their data, and set up
+a project from scratch. Run this FIRST when a user says "set up my project"
+or "where's my data?"
+
+### Detect ArcGIS Pro installation
+```python
+import os
+import sys
+
+def find_arcgis_pro():
+    """Detect ArcGIS Pro installation on Windows."""
+    info = {"installed": False, "path": None, "python": None, "version": None}
+
+    # Method 1: Windows Registry (most reliable)
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\ESRI\ArcGISPro",
+        )
+        info["path"] = winreg.QueryValueEx(key, "InstallDir")[0]
+        info["version"] = winreg.QueryValueEx(key, "Version")[0]
+        info["installed"] = True
+        winreg.CloseKey(key)
+    except (ImportError, OSError):
+        pass
+
+    # Method 2: Check default install locations
+    if not info["installed"]:
+        default_paths = [
+            r"C:\Program Files\ArcGIS\Pro",
+            r"C:\ArcGIS\Pro",
+            r"D:\ArcGIS\Pro",
+            r"D:\Program Files\ArcGIS\Pro",
+        ]
+        for p in default_paths:
+            if os.path.isdir(p):
+                info["path"] = p
+                info["installed"] = True
+                break
+
+    # Find the Python environment with arcpy
+    if info["path"]:
+        conda_env = os.path.join(
+            info["path"], "bin", "Python", "envs", "arcgispro-py3"
+        )
+        if os.path.isdir(conda_env):
+            info["python"] = os.path.join(conda_env, "python.exe")
+
+    # Try importing arcpy to confirm
+    try:
+        import arcpy
+        info["installed"] = True
+        info["version"] = arcpy.GetInstallInfo()["Version"]
+        print(f"ArcGIS Pro {info['version']} found")
+        print(f"Install: {info['path']}")
+        print(f"Product: {arcpy.ProductInfo()}")
+
+        # Check licensed extensions
+        extensions = ["Spatial", "3D", "Network", "GeoStats", "DataReviewer"]
+        for ext in extensions:
+            status = arcpy.CheckExtension(ext)
+            marker = "+" if status == "Available" else "-"
+            print(f"  [{marker}] {ext}: {status}")
+    except ImportError:
+        if info["installed"]:
+            print(f"ArcGIS Pro found at {info['path']} but arcpy not in current Python path")
+            print(f"Run scripts using: {info.get('python', 'ArcGIS Pro Python')}")
+        else:
+            print("ArcGIS Pro NOT found on this machine")
+
+    return info
+
+find_arcgis_pro()
+```
+
+### Scan a directory for GIS data
+```python
+import os
+
+def scan_for_gis_data(root_path):
+    """Walk a directory and catalogue every GIS-relevant file.
+
+    Use this when the user says 'my data is on E:\\' or 'look in Downloads'.
+    """
+    GIS_EXTENSIONS = {
+        # Vectors
+        ".shp": ("vector", "Shapefile"),
+        ".gpkg": ("vector", "GeoPackage"),
+        ".geojson": ("vector", "GeoJSON"),
+        ".json": ("vector", "GeoJSON"),
+        ".kml": ("vector", "KML"),
+        ".kmz": ("vector", "KMZ"),
+        ".gml": ("vector", "GML"),
+        ".tab": ("vector", "MapInfo TAB"),
+        ".mif": ("vector", "MapInfo MIF"),
+        # Rasters
+        ".tif": ("raster", "GeoTIFF"),
+        ".tiff": ("raster", "GeoTIFF"),
+        ".img": ("raster", "ERDAS Imagine"),
+        ".asc": ("raster", "ASCII Grid"),
+        ".ecw": ("raster", "ECW"),
+        ".jp2": ("raster", "JPEG2000"),
+        ".sid": ("raster", "MrSID"),
+        # Point clouds
+        ".las": ("pointcloud", "LiDAR LAS"),
+        ".laz": ("pointcloud", "LiDAR LAZ"),
+        # Tabular
+        ".csv": ("tabular", "CSV"),
+        ".xlsx": ("tabular", "Excel"),
+        ".xls": ("tabular", "Excel (legacy)"),
+        # Projects
+        ".aprx": ("project", "ArcGIS Pro Project"),
+        ".mxd": ("project", "ArcMap Project (legacy)"),
+        # Symbology
+        ".lyrx": ("symbology", "Layer File"),
+        ".lyr": ("symbology", "Layer File (legacy)"),
+        ".stylx": ("symbology", "Style File"),
+        # Documents
+        ".pdf": ("document", "PDF"),
+    }
+
+    found = {}
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        # Detect file geodatabases (folders ending in .gdb)
+        for d in dirnames[:]:
+            if d.lower().endswith(".gdb"):
+                found.setdefault("geodatabase", []).append({
+                    "path": os.path.join(dirpath, d),
+                    "type": "File Geodatabase",
+                    "name": d,
+                })
+
+        for filename in filenames:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in GIS_EXTENSIONS:
+                continue
+            category, fmt = GIS_EXTENSIONS[ext]
+            full_path = os.path.join(dirpath, filename)
+            try:
+                size_mb = os.path.getsize(full_path) / (1024 * 1024)
+            except OSError:
+                size_mb = 0
+            found.setdefault(category, []).append({
+                "path": full_path,
+                "type": fmt,
+                "name": filename,
+                "size_mb": round(size_mb, 1),
+            })
+
+    # Print report
+    total = sum(len(v) for v in found.values())
+    print(f"\n=== DATA SCAN: {root_path} ({total} GIS files found) ===\n")
+    for category, items in sorted(found.items()):
+        print(f"{category.upper()} ({len(items)} files):")
+        for item in items:
+            size = f"({item['size_mb']:.1f} MB)" if item.get("size_mb") else ""
+            print(f"  {item['name']}  {item['type']}  {size}")
+            print(f"    {item['path']}")
+        print()
+
+    return found
+
+# Example: scan a USB drive
+# scan_for_gis_data(r"E:\\")
+# scan_for_gis_data(os.path.expanduser("~\\Downloads"))
+```
+
+### Identify UK data from filenames
+```python
+def identify_uk_dataset(filename, fields=None):
+    """Guess what a UK GIS dataset is from its filename and fields.
+
+    OS VectorMap Local, Digimap DTM, EA Flood, MAGIC data all have
+    recognizable naming patterns.
+    """
+    name = filename.lower()
+    guesses = []
+
+    # OS Grid reference pattern (2 letters + 2 digits, e.g., SU34, TQ38)
+    import re
+    grid_ref = re.search(r'[a-z]{2}\d{2}', name)
+
+    # Digimap DTM tiles
+    if "dtm" in name and (".asc" in name or ".tif" in name):
+        res = "5m" if "5m" in name or "dtm5" in name else "50m" if "50m" in name else "unknown"
+        guesses.append(f"Edina Digimap DTM ({res} resolution)")
+        if grid_ref:
+            guesses.append(f"Grid tile: {grid_ref.group().upper()}")
+
+    # OS VectorMap Local / Strategi
+    if "road" in name:
+        guesses.append("OS road network (VectorMap Local or Strategi)")
+    if "rail" in name:
+        guesses.append("OS rail network")
+    if "surfacewater" in name or "river" in name or "watercourse" in name:
+        guesses.append("OS rivers / watercourses")
+    if "building" in name or "glasshouse" in name:
+        guesses.append("OS buildings (VectorMap Local)")
+    if "woodland" in name:
+        guesses.append("OS / Natural England woodland")
+
+    # EA Flood data
+    if "flood" in name:
+        if "zone_2" in name or "zone2" in name:
+            guesses.append("EA Flood Zone 2 (medium probability)")
+        elif "zone_3" in name or "zone3" in name:
+            guesses.append("EA Flood Zone 3 (high probability)")
+        elif "warning" in name:
+            guesses.append("EA Flood Warning Areas")
+        elif "alert" in name:
+            guesses.append("EA Flood Alert Areas")
+        else:
+            guesses.append("EA Flood data (check TYPE or PROB_4BAND field)")
+
+    # Natural England / MAGIC
+    if "alc" in name or "agri" in name and "land" in name:
+        guesses.append("Agricultural Land Classification (Natural England)")
+    if "habitat" in name or "priority" in name:
+        guesses.append("Priority Habitats Inventory (Natural England)")
+    if "sssi" in name:
+        guesses.append("SSSI — Site of Special Scientific Interest")
+    if "nnr" in name:
+        guesses.append("NNR — National Nature Reserve")
+    if "sac" in name:
+        guesses.append("SAC — Special Area of Conservation")
+    if "spa" in name:
+        guesses.append("SPA — Special Protection Area")
+    if "ancient" in name and "woodland" in name:
+        guesses.append("Ancient Woodland (irreplaceable habitat)")
+    if "ramsar" in name:
+        guesses.append("Ramsar wetland site")
+    if "greenbelt" in name or "green_belt" in name:
+        guesses.append("Green Belt designation")
+
+    # Basemap / aerial
+    if "25k" in name or "25000" in name:
+        guesses.append("OS 1:25,000 basemap (Explorer scale)")
+    if "50k" in name or "50000" in name:
+        guesses.append("OS 1:50,000 basemap (Landranger scale)")
+    if "aerial" in name or "ortho" in name:
+        guesses.append("Aerial imagery / orthophoto")
+
+    # Field-based identification
+    if fields:
+        field_names = [f.lower() for f in fields]
+        if "alc_grade" in field_names:
+            guesses.append("Confirmed: Agricultural Land Classification")
+        if "main_habit" in field_names:
+            guesses.append("Confirmed: Priority Habitats Inventory")
+        if "prob_4band" in field_names:
+            guesses.append("Confirmed: EA Flood Map for Planning")
+        if "classifica" in field_names or "roadnumber" in field_names:
+            guesses.append("Confirmed: OS road network")
+
+    return guesses if guesses else ["Unknown dataset — inspect fields manually"]
+```
+
+### Match scanned data to a project brief
+```python
+def match_data_to_brief(brief_requirements, scanned_data):
+    """Compare what the brief needs against what was found on disk.
+
+    brief_requirements: list of dicts with 'name' and 'keywords'
+    scanned_data: output from scan_for_gis_data()
+    """
+    all_files = []
+    for category in scanned_data.values():
+        all_files.extend(category)
+
+    matches = []
+    missing = []
+
+    for req in brief_requirements:
+        # Search by keyword matching against filenames
+        found = None
+        for f in all_files:
+            fname = f["name"].lower()
+            if any(kw.lower() in fname for kw in req["keywords"]):
+                found = f
+                break
+
+        if found:
+            matches.append({"requirement": req["name"], "file": found})
+        else:
+            missing.append(req)
+
+    # Print report
+    print("\n=== BRIEF vs DATA MATCH ===\n")
+    print(f"{'Requirement':<35} {'Found?':<25} {'Status'}")
+    print("-" * 80)
+    for m in matches:
+        print(f"{m['requirement']:<35} {m['file']['name']:<25} FOUND")
+    for m in missing:
+        print(f"{m['name']:<35} {'---':<25} MISSING")
+
+    if missing:
+        print(f"\n{len(missing)} datasets still needed:")
+        for m in missing:
+            source = m.get("source", "Check brief for source")
+            print(f"  - {m['name']}: download from {source}")
+
+    return {"matches": matches, "missing": missing}
+
+# Example usage for a typical UK suitability brief:
+UK_SUITABILITY_REQUIREMENTS = [
+    {"name": "Study area boundary", "keywords": ["study_area", "boundary", "site"],
+     "source": "Create in ArcGIS Pro or define coordinates"},
+    {"name": "OS Basemap (1:25k)", "keywords": ["25k", "25000", "basemap", "raster"],
+     "source": "Edina Digimap (digimap.edina.ac.uk)"},
+    {"name": "Roads", "keywords": ["road", "highway", "street"],
+     "source": "Edina Digimap — OS VectorMap Local"},
+    {"name": "Rail", "keywords": ["rail", "railway", "train"],
+     "source": "Edina Digimap — OS VectorMap Local"},
+    {"name": "Rivers / watercourses", "keywords": ["river", "water", "stream", "surfacewater"],
+     "source": "Edina Digimap — OS VectorMap Local"},
+    {"name": "Urban areas / buildings", "keywords": ["urban", "building", "builtup", "settlement"],
+     "source": "Edina Digimap — OS VectorMap Local"},
+    {"name": "Woodland", "keywords": ["woodland", "forest", "wood"],
+     "source": "Edina Digimap — OS VectorMap Local or Natural England"},
+    {"name": "DTM (elevation)", "keywords": ["dtm", "dem", "elevation", "terrain"],
+     "source": "Edina Digimap — DTM5"},
+    {"name": "Flood Zone 2", "keywords": ["flood_zone_2", "floodzone2", "fz2"],
+     "source": "data.gov.uk — EA Flood Map for Planning"},
+    {"name": "Flood Zone 3", "keywords": ["flood_zone_3", "floodzone3", "fz3", "flood"],
+     "source": "data.gov.uk — EA Flood Map for Planning"},
+    {"name": "Agricultural Land Classification", "keywords": ["alc", "agricultural", "agri_land"],
+     "source": "magic.defra.gov.uk — Natural England"},
+    {"name": "Priority Habitats", "keywords": ["habitat", "priority_habitat", "phi"],
+     "source": "magic.defra.gov.uk — Natural England"},
+    {"name": "SSSI", "keywords": ["sssi"],
+     "source": "magic.defra.gov.uk — Natural England"},
+    {"name": "SAC", "keywords": ["sac"],
+     "source": "magic.defra.gov.uk — Natural England"},
+    {"name": "SPA", "keywords": ["spa"],
+     "source": "magic.defra.gov.uk — Natural England"},
+    {"name": "Aerial imagery", "keywords": ["aerial", "ortho", "satellite"],
+     "source": "Edina Digimap — Aerial"},
+]
+```
+
+### Find .aprx projects on disk
+```python
+import glob
+
+def find_arcgis_projects(search_paths=None):
+    """Find all ArcGIS Pro projects (.aprx) on accessible drives."""
+    if search_paths is None:
+        search_paths = [
+            os.path.expanduser(r"~\Documents\ArcGIS\Projects"),
+            os.path.expanduser(r"~\Documents"),
+            os.path.expanduser(r"~\Desktop"),
+            os.path.expanduser(r"~\Downloads"),
+        ]
+        # Add removable drives (D: through H:)
+        for letter in "DEFGH":
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                search_paths.append(drive)
+
+    projects = []
+    for base in search_paths:
+        if not os.path.exists(base):
+            continue
+        for aprx in glob.glob(os.path.join(base, "**", "*.aprx"), recursive=True):
+            size_mb = os.path.getsize(aprx) / (1024 * 1024)
+            projects.append({"path": aprx, "size_mb": round(size_mb, 1)})
+
+    print(f"Found {len(projects)} ArcGIS Pro projects:")
+    for p in projects:
+        print(f"  {p['path']}  ({p['size_mb']} MB)")
+    return projects
+```
+
 ## Key Libraries & APIs
 
 - `arcpy` — core Python package for ArcGIS Pro geoprocessing

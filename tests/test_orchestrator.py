@@ -517,7 +517,60 @@ class TestArcGISPack:
 
     def test_manifest_version_updated(self):
         manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
-        assert manifest["version"] == "0.4.0"
+        assert manifest["version"] == "0.5.0"
+
+    def test_arcgis_setup_skill_exists(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-setup" / "SKILL.md").read_text()
+        assert "name: arcgis-setup" in skill
+        assert "user-invocable: true" in skill
+
+    def test_setup_skill_covers_arcgis_detection(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-setup" / "SKILL.md").read_text()
+        assert "Find ArcGIS Pro" in skill or "find ArcGIS Pro" in skill
+        assert "Registry" in skill or "registry" in skill
+        assert "conda" in skill or "Python" in skill
+
+    def test_setup_skill_covers_data_scanning(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-setup" / "SKILL.md").read_text()
+        assert "scan_for_gis_data" in skill
+        assert ".shp" in skill
+        assert ".gdb" in skill
+        assert ".asc" in skill
+        assert ".aprx" in skill
+
+    def test_setup_skill_covers_brief_matching(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-setup" / "SKILL.md").read_text()
+        assert "BRIEF" in skill or "brief" in skill
+        assert "MISSING" in skill
+        assert "FOUND" in skill
+
+    def test_manifest_lists_setup_skill(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        assert "skills/arcgis-setup" in manifest["skills"]
+
+    def test_manifest_has_setup_capabilities(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        for cap in ["environment-detection", "data-scanning", "brief-matching"]:
+            assert cap in manifest["capabilities"], f"Missing capability: {cap}"
+
+    def test_context_has_environment_detection(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Environment Detection" in context
+        assert "find_arcgis_pro" in context
+        assert "winreg" in context
+        assert "scan_for_gis_data" in context
+
+    def test_context_has_data_identification(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "identify_uk_dataset" in context
+        assert "match_data_to_brief" in context
+        assert "find_arcgis_projects" in context
+
+    def test_context_has_uk_suitability_requirements(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "UK_SUITABILITY_REQUIREMENTS" in context
+        assert "digimap.edina.ac.uk" in context or "Edina Digimap" in context
+        assert "magic.defra.gov.uk" in context
 
 
 if __name__ == "__main__":
