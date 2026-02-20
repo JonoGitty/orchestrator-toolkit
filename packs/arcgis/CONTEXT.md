@@ -368,27 +368,348 @@ arcpy.conversion.ExcelToTable(
 )
 ```
 
-### ArcGIS API for Python (web GIS)
+### ArcGIS API for Python (web GIS) — `arcgis` package
+
+The `arcgis` package is separate from `arcpy`. It talks to ArcGIS Online (AGOL)
+and Portal via REST. Works anywhere (no ArcGIS Pro install needed).
+
 ```python
 from arcgis.gis import GIS
-from arcgis.features import FeatureLayer
-from arcgis.geocoding import geocode, batch_geocode
 
+# Connect to ArcGIS Online
 gis = GIS("https://www.arcgis.com", "username", "password")
 
-# Search for content
-items = gis.content.search("owner:me AND type:Feature Layer")
+# Connect to Enterprise Portal
+gis = GIS("https://portal.company.com/portal", "admin", "pass")
 
-# Access a hosted feature layer
+# Anonymous access (public content only)
+gis = GIS()
+
+# Connect using Pro's active portal (when running inside ArcGIS Pro)
+gis = GIS("pro")
+```
+
+#### Content search and management
+```python
+# Search for items
+items = gis.content.search("owner:me AND type:Feature Layer", max_items=100)
+for item in items:
+    print(f"{item.title} | {item.type} | {item.id}")
+
+# Search with filters
+maps = gis.content.search(query="flood", item_type="Web Map", outside_org=False)
+layers = gis.content.search("tags:infrastructure", item_type="Feature Layer")
+
+# Get item by ID
+item = gis.content.get("abc123def456")
+print(item.title, item.type, item.url)
+
+# Create/upload content
+csv_item = gis.content.add(
+    item_properties={
+        "title": "Survey Results",
+        "type": "CSV",
+        "tags": "survey,2024",
+        "description": "Field survey point data",
+    },
+    data="survey_results.csv",
+)
+# Publish CSV as hosted feature layer
+published = csv_item.publish(overwrite=True)
+print(f"Published: {published.url}")
+
+# Upload and publish shapefile
+shp_item = gis.content.add({"title": "Parcels", "type": "Shapefile"}, data="parcels.zip")
+fl_item = shp_item.publish()
+
+# Upload file geodatabase
+gdb_item = gis.content.add(
+    {"title": "Analysis Results", "type": "File Geodatabase"},
+    data="results.gdb.zip",
+)
+
+# Update existing item
+item.update(item_properties={"description": "Updated description"})
+item.update(data="new_data.csv")
+
+# Delete item
+item.delete(permanent=True)
+
+# Move item to folder
+gis.content.create_folder("Archive")
+item.move("Archive")
+
+# Share item
+item.share(org=True)                    # share with organization
+item.share(everyone=True)               # share publicly
+item.share(groups=["group_id_here"])     # share with specific group
+```
+
+#### Feature layer CRUD (create, read, update, delete)
+```python
+from arcgis.features import FeatureLayer, FeatureSet
+import pandas as pd
+
+# Access hosted feature layer
 fl = FeatureLayer("https://services.arcgis.com/.../FeatureServer/0")
-sdf = fl.query(where="POP > 50000").sdf  # Spatially enabled DataFrame
+# Or from an item
+item = gis.content.get("abc123")
+fl = item.layers[0]       # first layer
+tbl = item.tables[0]      # first table (if any)
 
-# Publish a shapefile
-item = gis.content.add({"type": "Shapefile"}, data="parcels.zip")
-published = item.publish()
+# Query features
+result = fl.query(where="POPULATION > 50000", out_fields="NAME,POPULATION,SHAPE")
+print(f"Found {len(result.features)} features")
 
-# Geocode
+# Query to Spatially Enabled DataFrame (best for analysis)
+sdf = fl.query(where="1=1").sdf
+print(sdf.head())
+print(sdf.columns.tolist())
+print(sdf.spatial.name)  # geometry column
+
+# Query with spatial filter
+from arcgis.geometry import Envelope
+extent = Envelope({
+    "xmin": -118.5, "ymin": 33.7, "xmax": -118.1, "ymax": 34.1,
+    "spatialReference": {"wkid": 4326},
+})
+nearby = fl.query(geometry_filter=extent, return_geometry=True)
+
+# Add new features
+new_features = [
+    {
+        "attributes": {"NAME": "New Park", "TYPE": "Recreation", "AREA_HA": 12.5},
+        "geometry": {"x": -118.25, "y": 34.05, "spatialReference": {"wkid": 4326}},
+    },
+    {
+        "attributes": {"NAME": "Lake View", "TYPE": "Conservation", "AREA_HA": 45.0},
+        "geometry": {"x": -118.30, "y": 34.10, "spatialReference": {"wkid": 4326}},
+    },
+]
+result = fl.edit_features(adds=new_features)
+print(f"Added: {result['addResults']}")
+
+# Update existing features (must include OBJECTID)
+updates = [
+    {"attributes": {"OBJECTID": 42, "STATUS": "Approved", "REVIEW_DATE": "2024-06-15"}},
+]
+result = fl.edit_features(updates=updates)
+
+# Delete features
+result = fl.edit_features(deletes="42,43,44")  # by OID
+# Or delete by query
+fl.delete_features(where="STATUS = 'Expired'")
+
+# Append data from DataFrame
+import pandas as pd
+df = pd.read_csv("new_sites.csv")
+sdf = pd.DataFrame.spatial.from_xy(df, "LONGITUDE", "LATITUDE", sr=4326)
+fl.edit_features(adds=sdf.spatial.to_featureset())
+
+# Truncate and reload
+fl.manager.truncate()
+fl.edit_features(adds=new_features)
+```
+
+#### Web maps and web apps
+```python
+from arcgis.mapping import WebMap
+
+# Create a new web map
+wm = WebMap()
+wm.add_layer(gis.content.get("feature_layer_item_id"))
+wm.add_layer(fl, {"title": "Custom Title", "visibility": True})
+
+# Set extent
+wm.extent = {
+    "xmin": -118.5, "ymin": 33.7, "xmax": -118.1, "ymax": 34.1,
+    "spatialReference": {"wkid": 4326},
+}
+
+# Set basemap
+wm.basemap = "dark-gray-vector"
+# Options: streets, satellite, hybrid, topo, gray, dark-gray, oceans,
+#   streets-vector, topo-vector, gray-vector, dark-gray-vector
+
+# Save web map
+wm_item = wm.save(
+    item_properties={
+        "title": "Infrastructure Analysis",
+        "tags": "infrastructure,analysis",
+        "snippet": "Map showing infrastructure analysis results",
+    }
+)
+
+# Open existing web map
+existing_wm = WebMap(gis.content.get("webmap_item_id"))
+print(f"Layers: {[l.title for l in existing_wm.layers]}")
+
+# Update layer properties
+for layer in existing_wm.layers:
+    if layer.title == "Parcels":
+        layer.visibility = False
+existing_wm.update()
+```
+
+#### Portal administration
+```python
+from arcgis.gis import User, Group
+
+# User management
+me = gis.users.me
+print(f"Logged in as: {me.username} ({me.role})")
+
+# List all users (admin only)
+users = gis.users.search("*", max_users=500)
+for u in users:
+    print(f"  {u.username}: {u.role} | Last login: {u.lastLogin}")
+
+# Create user (Enterprise only)
+new_user = gis.users.create(
+    username="jdoe",
+    password="TempPass123!",
+    firstname="Jane", lastname="Doe",
+    email="jdoe@company.com",
+    role="org_publisher",
+    user_type="creatorUT",
+)
+
+# Group management
+groups = gis.groups.search("*")
+for g in groups:
+    print(f"  {g.title} ({len(g.get_members()['users'])} members)")
+
+# Create group
+new_group = gis.groups.create(
+    title="Field Team",
+    tags="field,survey",
+    description="Group for field survey team",
+    access="org",
+)
+new_group.add_users(["user1", "user2"])
+
+# Content usage and credits
+usage = me.items()
+for item in usage:
+    print(f"  {item.title}: {item.numViews} views, size={item.size}")
+```
+
+#### Geocoding (web-based)
+```python
+from arcgis.geocoding import geocode, reverse_geocode, batch_geocode
+
+# Single address geocode
 results = geocode("1600 Pennsylvania Ave, Washington DC")
+if results:
+    best = results[0]
+    print(f"Score: {best['score']}")
+    print(f"Location: {best['location']}")
+    print(f"Address: {best['attributes']['Match_addr']}")
+
+# Reverse geocode (coordinates to address)
+from arcgis.geometry import Point
+location = Point({"x": -77.0365, "y": 38.8977, "spatialReference": {"wkid": 4326}})
+address = reverse_geocode(location)
+print(address["address"]["Match_addr"])
+
+# Batch geocode (many addresses at once — uses credits on AGOL)
+addresses = [
+    "380 New York St, Redlands, CA",
+    "1 World Trade Center, New York, NY",
+    "1600 Amphitheatre Parkway, Mountain View, CA",
+]
+results = batch_geocode(addresses)
+for r in results:
+    print(f"  {r['attributes']['ResultID']}: {r['score']} - {r['address']}")
+
+# Geocode from DataFrame (creates point geometry from address column)
+import pandas as pd
+df = pd.read_csv("customers.csv")
+geocoded_sdf = geocode(df, address_field="ADDRESS", as_featureset=False)
+```
+
+#### Spatial analysis services (hosted)
+```python
+from arcgis.features.analysis import create_buffers, overlay_layers
+from arcgis.features.analysis import find_hot_spots, interpolate_points
+
+# Buffer analysis (runs on server, no local processing)
+buffer_result = create_buffers(
+    input_layer=fl,
+    distances=[1, 5, 10],
+    units="Kilometers",
+    dissolve_type="Dissolve",
+    output_name="service_areas",
+)
+
+# Overlay analysis
+overlay_result = overlay_layers(
+    input_layer=fl,
+    overlay_layer=other_fl,
+    overlay_type="Intersect",
+    output_name="intersection_result",
+)
+
+# Hot spot analysis
+hotspots = find_hot_spots(
+    analysis_layer=fl,
+    analysis_field="INCIDENT_COUNT",
+    output_name="crime_hotspots",
+)
+
+# Interpolation
+surface = interpolate_points(
+    input_layer=fl,
+    field="TEMPERATURE",
+    interpolate_option="5",
+    output_name="temp_surface",
+)
+
+# Enrich data with demographics (uses credits)
+from arcgis.features.enrich_data import enrich_layer
+enriched = enrich_layer(
+    input_layer=fl,
+    data_collections=["KeyGlobalFacts", "Policy"],
+    output_name="enriched_sites",
+)
+```
+
+#### Working with Spatially Enabled DataFrames
+```python
+import pandas as pd
+from arcgis.features import GeoAccessor, GeoSeriesAccessor
+
+# Read from feature layer
+sdf = fl.query(where="1=1").sdf
+
+# Create from CSV with coordinates
+df = pd.read_csv("sites.csv")
+sdf = pd.DataFrame.spatial.from_xy(df, x_column="LON", y_column="LAT", sr=4326)
+
+# Create from shapefile / GDB / GeoJSON
+sdf = pd.DataFrame.spatial.from_featureclass("path/to/data.shp")
+sdf = pd.DataFrame.spatial.from_featureclass(r"C:\data.gdb\parcels")
+
+# Spatial operations on DataFrames
+sdf.spatial.plot(map_widget=my_map)
+sdf.spatial.to_featureclass(r"C:\output.gdb\result")
+sdf.spatial.to_featurelayer("My Layer Title", gis=gis)
+
+# Buffer, clip, dissolve on SDF
+buffered = sdf.spatial.buffer(distance=500)
+clipped = sdf.spatial.clip(study_area_sdf)
+dissolved = sdf.dissolve(by="ZONE_CODE")
+
+# Spatial join
+joined = sdf.spatial.join(other_sdf, how="inner", op="intersects")
+
+# Area / length calculations
+sdf["AREA_M2"] = sdf.SHAPE.geom.area
+sdf["LENGTH_M"] = sdf.SHAPE.geom.length
+
+# Export to GeoJSON, Shapefile, CSV
+sdf.spatial.to_featureclass(r"C:\output\result.shp")
+sdf.to_csv("output.csv", index=False)
 ```
 
 ## Field Types Reference
@@ -510,6 +831,251 @@ if __name__ == "__main__":
         traceback.print_exc()
         sys.exit(1)
 ```
+
+## Dataset Discovery & Inspection
+
+How to inventory what's on the map, understand each dataset, and pick the right
+tools. Run these FIRST before starting any analysis.
+
+### List everything in the map
+```python
+aprx = arcpy.mp.ArcGISProject("CURRENT")  # or path to .aprx
+
+for m in aprx.listMaps():
+    print(f"\n=== Map: {m.name} ===")
+    for lyr in m.listLayers():
+        if lyr.isFeatureLayer:
+            desc = arcpy.Describe(lyr)
+            count = int(arcpy.management.GetCount(lyr)[0])
+            sr = desc.spatialReference
+            print(f"  [Vector] {lyr.name}")
+            print(f"    Shape: {desc.shapeType}  |  Features: {count}")
+            print(f"    CRS: {sr.name} (EPSG:{sr.factoryCode})")
+            print(f"    Source: {lyr.dataSource}")
+            print(f"    Fields: {[f.name for f in arcpy.ListFields(lyr) if f.type not in ('OID','Geometry')]}")
+        elif lyr.isRasterLayer:
+            desc = arcpy.Describe(lyr)
+            print(f"  [Raster] {lyr.name}")
+            print(f"    Size: {desc.width}x{desc.height}  |  Bands: {desc.bandCount}")
+            print(f"    Cell: {desc.meanCellWidth}x{desc.meanCellHeight}")
+            print(f"    CRS: {desc.spatialReference.name}")
+            print(f"    Pixel type: {desc.pixelType}")
+            print(f"    Source: {lyr.dataSource}")
+        elif lyr.isGroupLayer:
+            print(f"  [Group] {lyr.name} ({len(list(lyr.listLayers()))} sub-layers)")
+        else:
+            print(f"  [Other] {lyr.name} (table/basemap/etc)")
+```
+
+### Detailed field inspection for a specific layer
+```python
+layer_name = "parcels"  # change to your layer
+fields = arcpy.ListFields(layer_name)
+
+print(f"\n{'Field':<25} {'Type':<12} {'Length':<8} {'Nullable':<10} {'Domain'}")
+print("-" * 75)
+for f in fields:
+    domain = f.domain if f.domain else ""
+    print(f"{f.name:<25} {f.type:<12} {f.length:<8} {f.isNullable:<10} {domain}")
+
+# Sample first 5 rows to understand the data
+print("\nSample data (first 5 rows):")
+field_names = [f.name for f in fields if f.type not in ("OID", "Geometry", "Blob")]
+with arcpy.da.SearchCursor(layer_name, field_names) as cursor:
+    for i, row in enumerate(cursor):
+        if i >= 5:
+            break
+        print(f"  {dict(zip(field_names, row))}")
+```
+
+### Unique values and field statistics
+```python
+# Get unique values for a field (useful for classification / filtering)
+def unique_values(table, field):
+    with arcpy.da.SearchCursor(table, [field]) as cursor:
+        return sorted({row[0] for row in cursor if row[0] is not None})
+
+print("Land use types:", unique_values("parcels", "LAND_USE"))
+print("Zone codes:", unique_values("parcels", "ZONE_CODE"))
+
+# Numeric field statistics
+import statistics
+def field_stats(table, field):
+    with arcpy.da.SearchCursor(table, [field]) as cursor:
+        values = [row[0] for row in cursor if row[0] is not None]
+    return {
+        "count": len(values),
+        "min": min(values), "max": max(values),
+        "mean": statistics.mean(values),
+        "median": statistics.median(values),
+        "stdev": statistics.stdev(values) if len(values) > 1 else 0,
+    }
+print("Elevation stats:", field_stats("sample_points", "ELEVATION"))
+```
+
+### Check spatial reference consistency across layers
+```python
+aprx = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = aprx.listMaps()[0]
+
+crs_report = {}
+for lyr in map_obj.listLayers():
+    if lyr.isFeatureLayer or lyr.isRasterLayer:
+        desc = arcpy.Describe(lyr)
+        sr = desc.spatialReference
+        key = f"{sr.name} (EPSG:{sr.factoryCode})"
+        crs_report.setdefault(key, []).append(lyr.name)
+
+print("\n=== CRS Report ===")
+for crs, layers in crs_report.items():
+    print(f"\n{crs}:")
+    for name in layers:
+        print(f"  - {name}")
+
+if len(crs_report) > 1:
+    print("\n⚠ WARNING: Mixed coordinate systems detected!")
+    print("  Use arcpy.management.Project() to reproject before analysis.")
+```
+
+### Identify geometry type and pick the right tool
+```python
+# Quick decision helper: what can I do with this data?
+def suggest_tools(layer_name):
+    desc = arcpy.Describe(layer_name)
+    shape = desc.shapeType
+    suggestions = []
+
+    if shape == "Point":
+        suggestions = [
+            "Buffer → create areas around points",
+            "Near → find closest features",
+            "SpatialJoin → attach polygon attributes to points",
+            "Kernel Density / IDW → interpolate to surface",
+            "Hot Spot Analysis → find clusters",
+            "XY To Line → connect pairs of points",
+        ]
+    elif shape == "Polygon":
+        suggestions = [
+            "Intersect / Union → overlay with other polygons",
+            "Clip → cut to study area boundary",
+            "Dissolve → merge by attribute",
+            "Buffer → expand/shrink boundaries",
+            "SpatialJoin → count points inside polygons",
+            "Erase → subtract protected areas",
+            "CalculateGeometryAttributes → compute area/perimeter",
+            "Zonal Statistics → summarize raster values per polygon",
+        ]
+    elif shape == "Polyline":
+        suggestions = [
+            "Buffer → create corridors",
+            "Intersect → find crossing points",
+            "Near → distance from features to lines",
+            "Split Line at Point → segment lines",
+            "Feature Vertices To Points → extract nodes",
+            "Network Analyst → routing (if network dataset)",
+            "GeneratePointsAlongLines → sample at intervals",
+        ]
+    elif shape == "MultiPatch":
+        suggestions = [
+            "3D Analyst tools (Is3D, Skyline, LineOfSight)",
+            "Multipatch footprint → convert to 2D polygons",
+        ]
+
+    count = int(arcpy.management.GetCount(layer_name)[0])
+    sr = desc.spatialReference
+    print(f"\n{layer_name}: {shape} ({count} features, {sr.name})")
+    print("Suggested tools:")
+    for s in suggestions:
+        print(f"  → {s}")
+
+# Run for each layer
+for lyr in map_obj.listLayers():
+    if lyr.isFeatureLayer:
+        suggest_tools(lyr.name)
+```
+
+### Raster inspection and tool suggestions
+```python
+def inspect_raster(raster_name):
+    desc = arcpy.Describe(raster_name)
+    r = arcpy.Raster(raster_name)
+    print(f"\n{raster_name}:")
+    print(f"  Dimensions: {desc.width} x {desc.height}")
+    print(f"  Cell size: {desc.meanCellWidth} x {desc.meanCellHeight}")
+    print(f"  Bands: {desc.bandCount}")
+    print(f"  Pixel type: {desc.pixelType}")
+    print(f"  NoData: {r.noDataValue}")
+    print(f"  Value range: {r.minimum} to {r.maximum}")
+    print(f"  Mean: {r.mean:.2f}  |  Std Dev: {r.standardDeviation:.2f}")
+    print(f"  CRS: {desc.spatialReference.name}")
+
+    # Suggest tools based on raster characteristics
+    suggestions = [
+        "Slope / Aspect → terrain derivatives (if DEM)",
+        "Hillshade → shaded relief visualization",
+        "Reclassify → classify into categories",
+        "Con → conditional (if/else) map algebra",
+        "ExtractByMask → clip to polygon",
+        "ZonalStatisticsAsTable → summarize per zone",
+        "FocalStatistics → neighborhood smoothing",
+        "Contour → generate isolines",
+    ]
+    if desc.bandCount > 1:
+        suggestions.extend([
+            "CompositeBands → combine bands",
+            "NDVI → (Band4 - Band3) / (Band4 + Band3) for vegetation",
+            "Iso Cluster / Maximum Likelihood → classify imagery",
+        ])
+    print("  Suggested tools:")
+    for s in suggestions:
+        print(f"    → {s}")
+
+# Inspect all rasters in workspace
+arcpy.env.workspace = r"C:\Projects\data.gdb"
+for raster in arcpy.ListRasters():
+    inspect_raster(raster)
+```
+
+### List everything in a geodatabase (no map needed)
+```python
+# Inventory an entire geodatabase
+def inventory_gdb(gdb_path):
+    arcpy.env.workspace = gdb_path
+    print(f"\n=== Geodatabase: {gdb_path} ===\n")
+
+    # Feature datasets
+    for fds in arcpy.ListDatasets(feature_type="Feature") or []:
+        print(f"[Feature Dataset] {fds}")
+        arcpy.env.workspace = os.path.join(gdb_path, fds)
+        for fc in arcpy.ListFeatureClasses():
+            desc = arcpy.Describe(fc)
+            count = int(arcpy.management.GetCount(fc)[0])
+            print(f"  {fc}: {desc.shapeType} ({count} features)")
+        arcpy.env.workspace = gdb_path
+
+    # Standalone feature classes
+    print("\n[Standalone Feature Classes]")
+    for fc in arcpy.ListFeatureClasses() or []:
+        desc = arcpy.Describe(fc)
+        count = int(arcpy.management.GetCount(fc)[0])
+        print(f"  {fc}: {desc.shapeType} ({count} features)")
+
+    # Tables
+    print("\n[Tables]")
+    for tbl in arcpy.ListTables() or []:
+        count = int(arcpy.management.GetCount(tbl)[0])
+        print(f"  {tbl}: {count} rows")
+
+    # Rasters
+    print("\n[Rasters]")
+    for raster in arcpy.ListRasters() or []:
+        desc = arcpy.Describe(raster)
+        print(f"  {raster}: {desc.width}x{desc.height}, {desc.bandCount} bands")
+
+inventory_gdb(r"C:\Projects\analysis.gdb")
+```
+
+---
 
 ## Example Workflows
 
@@ -1110,6 +1676,650 @@ for toolbox in arcpy.ListToolboxes():
     print(f"\n{toolbox}")
     for tool in arcpy.ListTools(f"*_{toolbox.split(';')[0]}"):
         print(f"  {tool}")
+```
+
+---
+
+## Hydrology & Watershed Analysis
+
+Full watershed delineation and hydrological modelling using Spatial Analyst.
+
+### Complete watershed workflow
+```python
+import arcpy
+from arcpy.sa import *
+arcpy.CheckOutExtension("Spatial")
+arcpy.env.overwriteOutput = True
+
+dem = "elevation_dem.tif"
+
+# Step 1: Fill sinks — removes small imperfections in the DEM
+# Without this, water gets "stuck" in artificial depressions
+filled = Fill(dem)
+filled.save("dem_filled.tif")
+
+# Step 2: Flow Direction — which way does water flow from each cell?
+# D8 method: assigns one of 8 directions (1,2,4,8,16,32,64,128)
+flow_dir = FlowDirection(filled, force_flow="NORMAL")
+flow_dir.save("flow_direction.tif")
+
+# Step 3: Flow Accumulation — how many upstream cells drain through each cell?
+# High values = streams, low values = ridges
+flow_acc = FlowAccumulation(flow_dir, data_type="FLOAT")
+flow_acc.save("flow_accumulation.tif")
+
+# Step 4: Define stream network — threshold determines stream density
+# Lower threshold = more streams; typical values: 500-5000 cells
+stream_threshold = 1000
+streams = Con(flow_acc > stream_threshold, 1)
+streams.save("streams_raster.tif")
+
+# Step 5: Stream Order (Strahler) — classify stream hierarchy
+# 1 = headwater, higher = larger rivers
+stream_order = StreamOrder(streams, flow_dir, "STRAHLER")
+stream_order.save("stream_order.tif")
+
+# Step 6: Stream to Feature — convert raster streams to polylines
+arcpy.sa.StreamToFeature(stream_order, flow_dir, "stream_network", "SIMPLIFY")
+
+# Step 7: Snap Pour Points — snap outlet points to highest flow accumulation
+# Distance should be > cell size but not too large
+pour_points = "outlet_points"  # your outlet locations
+snapped = SnapPourPoint(pour_points, flow_acc, snap_distance=30, pour_point_field="ID")
+snapped.save("snapped_pour_points.tif")
+
+# Step 8: Watershed delineation — delineate catchment for each pour point
+watersheds = Watershed(flow_dir, snapped)
+watersheds.save("watersheds.tif")
+
+# Step 9: Convert to polygon for further analysis
+arcpy.conversion.RasterToPolygon(
+    in_raster="watersheds.tif",
+    out_polygon_features="watershed_polygons",
+    simplify="SIMPLIFY",
+    raster_field="Value",
+)
+
+# Step 10: Calculate area for each watershed
+arcpy.management.CalculateGeometryAttributes(
+    "watershed_polygons",
+    [["AREA_KM2", "AREA"]],
+    area_unit="SQUARE_KILOMETERS",
+)
+
+arcpy.CheckInExtension("Spatial")
+print("Watershed delineation complete")
+```
+
+### Stream link and basin delineation
+```python
+from arcpy.sa import *
+
+# Stream Link — unique ID for each stream segment between junctions
+stream_links = StreamLink(streams, flow_dir)
+stream_links.save("stream_links.tif")
+
+# Basin — delineate ALL drainage basins (no pour points needed)
+basins = Basin(flow_dir)
+basins.save("all_basins.tif")
+
+# Convert basins to polygons
+arcpy.conversion.RasterToPolygon("all_basins.tif", "basin_polygons", "SIMPLIFY")
+```
+
+### Terrain derivatives for hydrology
+```python
+from arcpy.sa import *
+dem = "dem_filled.tif"
+
+# Slope — steepness (affects runoff speed)
+slope = Slope(dem, output_measurement="DEGREE")
+slope.save("slope_degrees.tif")
+
+# Aspect — direction of downhill face (affects solar radiation, snowmelt)
+aspect = Aspect(dem)
+aspect.save("aspect.tif")
+
+# Curvature — convex/concave terrain (affects flow convergence)
+curvature = Curvature(dem, z_factor=1)
+curvature.save("curvature.tif")
+
+# Topographic Wetness Index (TWI) — where water accumulates
+# TWI = ln(flow_accumulation / tan(slope_radians))
+import math
+flow_acc = FlowAccumulation(FlowDirection(Fill(dem)), data_type="FLOAT")
+slope_rad = Slope(dem, output_measurement="DEGREE") * (math.pi / 180)
+# Avoid division by zero: clamp slope minimum
+slope_clamped = Con(slope_rad < 0.001, 0.001, slope_rad)
+twi = Ln((flow_acc + 1) / Tan(slope_clamped))
+twi.save("twi.tif")
+```
+
+### Flood inundation mapping
+```python
+from arcpy.sa import *
+
+dem = "dem_filled.tif"
+flood_level = 105.5  # water surface elevation in same units as DEM
+
+# Areas below flood level = inundated
+flooded = Con(Raster(dem) <= flood_level, 1, 0)
+flooded.save("flood_extent.tif")
+
+# Convert to polygon
+arcpy.conversion.RasterToPolygon("flood_extent.tif", "flood_polygon", "SIMPLIFY")
+
+# Calculate flood depth
+flood_depth = Con(Raster(dem) <= flood_level, flood_level - Raster(dem))
+flood_depth.save("flood_depth.tif")
+
+# Zonal stats: what's affected?
+arcpy.sa.ZonalStatisticsAsTable(
+    "flood_polygon", "GRIDCODE", "buildings", "flood_building_stats", "DATA", "ALL"
+)
+```
+
+### Curve Number rainfall-runoff (SCS method)
+```python
+from arcpy.sa import *
+
+# Inputs: CN grid (from soil + land use), rainfall depth
+cn_grid = Raster("curve_number.tif")
+rainfall_inches = 4.0  # storm event depth
+
+# S = potential maximum retention
+s = (1000.0 / cn_grid) - 10.0
+# Ia = initial abstraction (0.2S)
+ia = 0.2 * s
+# Runoff Q (inches) — only where rainfall > Ia
+q = Con(
+    rainfall_inches > ia,
+    ((rainfall_inches - ia) ** 2) / (rainfall_inches - ia + s),
+    0,
+)
+q.save("runoff_depth.tif")
+```
+
+---
+
+## 3D Analyst & LAS / Point Cloud Processing
+
+Working with LiDAR data, TINs, 3D features, and point clouds.
+
+### LAS dataset setup and inspection
+```python
+import arcpy
+arcpy.CheckOutExtension("3D")
+
+# Create a LAS dataset (index for .las/.laz files)
+arcpy.management.CreateLasDataset(
+    input=r"C:\LiDAR\tiles",              # folder of .las files
+    out_las_dataset="lidar_index.lasd",
+    folder_recursion="RECURSION",
+    compute_stats="COMPUTE_STATS",
+    relative_paths="RELATIVE_PATHS",
+)
+
+# Get LAS dataset properties
+desc = arcpy.Describe("lidar_index.lasd")
+print(f"Point count: {desc.pointCount:,}")
+print(f"Files: {desc.fileCount}")
+print(f"Z range: {desc.ZMin:.2f} to {desc.ZMax:.2f}")
+print(f"CRS: {desc.spatialReference.name}")
+
+# LAS dataset statistics
+arcpy.management.LasDatasetStatistics(
+    in_las_dataset="lidar_index.lasd",
+    calculation_type="DATASET_STATS",
+    out_file="las_stats.csv",
+)
+```
+
+### LAS classification and filtering
+```python
+# LAS point classifications (ASPRS standard):
+#   1 = Unassigned     2 = Ground          3 = Low vegetation
+#   4 = Medium veg     5 = High veg        6 = Building
+#   7 = Low point      9 = Water          17 = Bridge deck
+
+# Classify ground points automatically
+arcpy.ddd.ClassifyLasGround(
+    in_las_dataset="lidar_index.lasd",
+    method="AGGRESSIVE",  # CONSERVATIVE, STANDARD, or AGGRESSIVE
+)
+
+# Classify buildings
+arcpy.ddd.ClassifyLasBuilding(
+    in_las_dataset="lidar_index.lasd",
+    min_height="2 Meters",
+    min_area="10 SquareMeters",
+)
+
+# Classify noise (outliers)
+arcpy.ddd.ClassifyLasNoise(
+    in_las_dataset="lidar_index.lasd",
+    method="RELATIVE_HEIGHT",
+    edit_las="CLASSIFY",
+    withheld="WITHHELD",
+    ground="GROUND",
+    low_z="-5 Meters",
+    high_z="100 Meters",
+    max_neighbors=6,
+    step_width="5 Meters",
+    step_height="2.5 Meters",
+)
+
+# Make layer with specific class filter (ground only)
+arcpy.management.MakeLasDatasetLayer(
+    in_las_dataset="lidar_index.lasd",
+    out_layer="ground_points",
+    class_code=[2],  # ground
+)
+```
+
+### LAS to raster surfaces (DEM / DSM)
+```python
+# DEM (bare earth) — ground points only (class 2)
+arcpy.management.MakeLasDatasetLayer("lidar_index.lasd", "ground_lyr", class_code=[2])
+arcpy.conversion.LasDatasetToRaster(
+    in_las_dataset="ground_lyr",
+    out_raster="dem_lidar.tif",
+    value_field="ELEVATION",
+    interpolation_type="BINNING AVERAGE LINEAR",
+    data_type="FLOAT",
+    sampling_type="CELLSIZE",
+    sampling_value=1,  # 1m resolution
+)
+
+# DSM (includes buildings + vegetation) — first returns
+arcpy.management.MakeLasDatasetLayer(
+    "lidar_index.lasd", "first_return_lyr",
+    class_code=[1, 2, 3, 4, 5, 6],
+    return_values=["Last Return"],
+)
+arcpy.conversion.LasDatasetToRaster(
+    in_las_dataset="lidar_index.lasd",
+    out_raster="dsm_lidar.tif",
+    value_field="ELEVATION",
+    interpolation_type="BINNING MAXIMUM LINEAR",
+    data_type="FLOAT",
+    sampling_type="CELLSIZE",
+    sampling_value=1,
+)
+
+# CHM (Canopy Height Model) = DSM - DEM
+from arcpy.sa import *
+arcpy.CheckOutExtension("Spatial")
+chm = Raster("dsm_lidar.tif") - Raster("dem_lidar.tif")
+chm = Con(chm < 0, 0, chm)  # no negative heights
+chm.save("canopy_height_model.tif")
+arcpy.CheckInExtension("Spatial")
+```
+
+### TIN (Triangulated Irregular Network)
+```python
+# Create TIN from points
+arcpy.ddd.CreateTin(
+    out_tin="terrain_tin",
+    spatial_reference=arcpy.SpatialReference(2193),
+)
+arcpy.ddd.EditTin(
+    in_tin="terrain_tin",
+    in_features=[
+        ["elevation_points", "ELEVATION", "Mass_Points", "<None>"],
+        ["boundary_polygon", "<None>", "Hard_Clip", "<None>"],
+        ["breaklines", "ELEVATION", "Hard_Line", "<None>"],
+    ],
+)
+
+# TIN to raster
+arcpy.ddd.TinRaster(
+    in_tin="terrain_tin",
+    out_raster="tin_surface.tif",
+    data_type="FLOAT",
+    method="LINEAR",
+    sample_distance="CELLSIZE 5",
+)
+
+# TIN domain (extract boundary polygon)
+arcpy.ddd.TinDomain("terrain_tin", "tin_boundary", "POLYGON")
+
+# TIN contours
+arcpy.ddd.TinContour("terrain_tin", "tin_contours", interval=10)
+
+# TIN edges and nodes
+arcpy.ddd.TinEdge("terrain_tin", "tin_edges", edge_type="DATA")
+arcpy.ddd.TinNode("terrain_tin", "tin_nodes")
+```
+
+### Visibility analysis
+```python
+# Viewshed — what's visible from observer points
+from arcpy.sa import *
+arcpy.CheckOutExtension("Spatial")
+arcpy.CheckOutExtension("3D")
+
+viewshed = Viewshed2(
+    in_raster="dem.tif",
+    in_observer_features="lookout_points",
+    out_agl_raster="above_ground_level.tif",
+    analysis_type="FREQUENCY",
+    observer_height=1.7,  # eye height meters
+    target_height=0,
+    refractivity_coefficient=0.13,
+)
+viewshed.save("viewshed_result.tif")
+
+# Line of Sight
+arcpy.ddd.LineOfSight(
+    in_surface="dem.tif",
+    in_line_feature_class="sight_lines",
+    out_los_feature_class="los_result",
+    out_obstruction_feature_class="los_obstructions",
+)
+
+# Skyline — silhouette from an observer
+arcpy.ddd.Skyline(
+    in_observer_point_features="observer_point",
+    out_feature_class="skyline_result",
+    in_surface="dem.tif",
+    surface_radius="5000 Meters",
+)
+
+arcpy.CheckInExtension("3D")
+arcpy.CheckInExtension("Spatial")
+```
+
+### 3D feature operations
+```python
+arcpy.CheckOutExtension("3D")
+
+# Interpolate shape — drape 2D features onto a surface
+arcpy.ddd.InterpolateShape(
+    in_surface="dem.tif",
+    in_feature_class="roads_2d",
+    out_feature_class="roads_3d",
+)
+
+# Add Z information (min/max/mean Z to attributes)
+arcpy.ddd.AddZInformation(
+    in_feature_class="roads_3d",
+    out_property=["Z_MIN", "Z_MAX", "Z_MEAN", "LENGTH_3D"],
+)
+
+# Difference 3D — compare two surfaces
+arcpy.ddd.Difference3D(
+    in_features_minuend="dsm_features",
+    in_features_subtrahend="dem_features",
+    out_feature_class="volume_diff",
+)
+
+# Surface volume — cut/fill between surface and reference plane
+arcpy.ddd.SurfaceVolume(
+    in_surface="dem.tif",
+    out_text_file="volume_report.txt",
+    reference_plane="ABOVE",
+    base_z=100,
+)
+
+# Cut Fill — compare two DEMs (before vs after)
+from arcpy.sa import *
+arcpy.CheckOutExtension("Spatial")
+cut_fill = CutFill("dem_before.tif", "dem_after.tif")
+cut_fill.save("cut_fill_result.tif")
+arcpy.CheckInExtension("Spatial")
+
+arcpy.CheckInExtension("3D")
+```
+
+---
+
+## Time-Series & Temporal Analysis
+
+Working with time-enabled data, multidimensional rasters, and temporal patterns.
+
+### Enable time on feature layers
+```python
+import arcpy
+import datetime
+
+# Add a datetime field if not present
+arcpy.management.AddField("incidents", "EVENT_DATE", "DATE")
+
+# Parse dates from string field
+with arcpy.da.UpdateCursor("incidents", ["DATE_STRING", "EVENT_DATE"]) as cursor:
+    for row in cursor:
+        try:
+            row[1] = datetime.datetime.strptime(row[0], "%m/%d/%Y %H:%M")
+        except (ValueError, TypeError):
+            row[1] = None
+        cursor.updateRow(row)
+
+# Enable time on a layer via CIM
+aprx = arcpy.mp.ArcGISProject("CURRENT")
+m = aprx.listMaps()[0]
+lyr = m.listLayers("incidents")[0]
+
+cim = lyr.getDefinition("V3")
+cim.featureTable.timeFields = arcpy.cim.CIMTimeTableDefinition()
+cim.featureTable.timeFields.startTimeField = "EVENT_DATE"
+cim.featureTable.timeFields.timeValueFormat = "yyyy-MM-dd HH:mm:ss"
+lyr.setDefinition(cim)
+```
+
+### Temporal aggregation and binning
+```python
+import arcpy
+import datetime
+from collections import defaultdict
+
+# Aggregate events by time period (day / week / month / year)
+def aggregate_by_period(table, date_field, period="MONTH"):
+    counts = defaultdict(int)
+    with arcpy.da.SearchCursor(table, [date_field]) as cursor:
+        for row in cursor:
+            if row[0] is None:
+                continue
+            dt = row[0]
+            if period == "HOUR":
+                key = dt.strftime("%Y-%m-%d %H:00")
+            elif period == "DAY":
+                key = dt.strftime("%Y-%m-%d")
+            elif period == "WEEK":
+                key = dt.strftime("%Y-W%W")
+            elif period == "MONTH":
+                key = dt.strftime("%Y-%m")
+            elif period == "YEAR":
+                key = str(dt.year)
+            counts[key] += 1
+
+    for period_key in sorted(counts):
+        print(f"  {period_key}: {counts[period_key]} events")
+    return dict(counts)
+
+print("Monthly incident counts:")
+monthly = aggregate_by_period("incidents", "EVENT_DATE", "MONTH")
+```
+
+### Time-sliced analysis (compare periods)
+```python
+import arcpy
+import datetime
+
+# Filter features by time range and run analysis on each slice
+def time_slice_analysis(fc, date_field, start, end, interval_days=30):
+    results = []
+    current = start
+    while current < end:
+        next_date = current + datetime.timedelta(days=interval_days)
+        where = (
+            f"{date_field} >= timestamp '{current.strftime('%Y-%m-%d')}' "
+            f"AND {date_field} < timestamp '{next_date.strftime('%Y-%m-%d')}'"
+        )
+        # Select features in this time window
+        arcpy.management.MakeFeatureLayer(fc, "time_slice", where)
+        count = int(arcpy.management.GetCount("time_slice")[0])
+
+        if count > 0:
+            period_name = current.strftime("%Y_%m")
+            arcpy.sa.KernelDensity(
+                "time_slice", "NONE", cell_size=100, search_radius=500
+            ).save(f"density_{period_name}.tif")
+            results.append({"period": period_name, "count": count})
+            print(f"  {period_name}: {count} events -> density created")
+
+        arcpy.management.Delete("time_slice")
+        current = next_date
+    return results
+
+time_slice_analysis(
+    "crime_incidents", "DATE_OCC",
+    datetime.datetime(2024, 1, 1),
+    datetime.datetime(2025, 1, 1),
+    interval_days=30,
+)
+```
+
+### Space-Time Cube for pattern mining
+```python
+import arcpy
+
+# Create Space Time Cube from points
+# Aggregates point data into space-time bins for trend analysis
+arcpy.stpm.CreateSpaceTimeCube(
+    in_features="incidents",
+    output_cube="incidents_cube.nc",
+    time_field="EVENT_DATE",
+    time_step_interval="1 Months",
+    distance_interval="500 Meters",
+)
+
+# Emerging Hot Spot Analysis — find new, intensifying, or diminishing clusters
+arcpy.stpm.EmergingHotSpotAnalysis(
+    in_cube="incidents_cube.nc",
+    analysis_variable="COUNT",
+    output_features="emerging_hotspots",
+    neighborhood_distance="1000 Meters",
+    neighborhood_time_step=3,
+)
+# Result categories: New, Consecutive, Intensifying, Persistent,
+#   Diminishing, Sporadic, Oscillating, Historical
+
+# Local Outlier Analysis — space-time outliers
+arcpy.stpm.LocalOutlierAnalysis(
+    in_cube="incidents_cube.nc",
+    analysis_variable="COUNT",
+    output_features="space_time_outliers",
+    neighborhood_distance="1000 Meters",
+    neighborhood_time_step=1,
+)
+
+# Time Series Clustering — group locations with similar temporal patterns
+arcpy.stpm.TimeSeriesClustering(
+    in_cube="incidents_cube.nc",
+    analysis_variable="COUNT",
+    output_features="time_clusters",
+    characteristics_of_interest="PROFILES",
+    cluster_count=5,
+)
+
+# Visualize cube as 2D map
+arcpy.stpm.VisualizeSpaceTimeCube2D(
+    in_cube="incidents_cube.nc",
+    cube_variable="COUNT",
+    display_theme="TRENDS",
+    output_features="trend_map",
+)
+```
+
+### Multidimensional raster analysis (NetCDF, HDF, GRIB)
+```python
+import arcpy
+from arcpy.sa import *
+from arcpy.ia import *
+arcpy.CheckOutExtension("Spatial")
+
+# Create multidimensional raster from NetCDF (climate, ocean, weather data)
+arcpy.management.MakeMultidimensionalRasterLayer(
+    in_multidimensional_raster="temperature.nc",
+    out_multidimensional_raster_layer="temp_layer",
+    variables=["air_temperature"],
+    dimension_def="BY_RANGES",
+    dimension_ranges=[["StdTime", "2020-01-01", "2024-12-31"]],
+)
+
+# Aggregate across time dimension (mean temperature per pixel)
+arcpy.ia.AggregateMultidimensionalRaster(
+    in_multidimensional_raster="temp_layer",
+    dimension="StdTime",
+    aggregation_method="MEAN",
+    aggregation_def="INTERVAL_KEYWORD",
+    interval_keyword="YEARLY",
+).save("yearly_mean_temp.crf")
+
+# Trend analysis per pixel over time
+arcpy.ia.GenerateTrendRaster(
+    in_multidimensional_raster="temp_layer",
+    dimension="StdTime",
+    variables=["air_temperature"],
+    trend_line_type="LINEAR",
+).save("temperature_trend.crf")
+
+# Anomaly detection (deviation from long-term mean)
+arcpy.ia.GenerateMultidimensionalAnomaly(
+    in_multidimensional_raster="temp_layer",
+    variables=["air_temperature"],
+    method="DIFFERENCE_FROM_MEAN",
+    calculation_interval="RECURRING_MONTHLY",
+).save("temp_anomalies.crf")
+
+arcpy.CheckInExtension("Spatial")
+```
+
+### Change detection between two time periods
+```python
+from arcpy.sa import *
+arcpy.CheckOutExtension("Spatial")
+
+# Raster change detection (land cover at two dates)
+before = Raster("landcover_2020.tif")
+after = Raster("landcover_2024.tif")
+
+# Simple difference
+change = after - before
+change.save("change_raw.tif")
+
+# Classify change types
+# Example: land cover codes 1=urban, 2=agriculture, 3=forest, 4=water
+change_type = Con(
+    (before == 3) & (after == 1), 1,  # forest to urban (deforestation)
+    Con(
+        (before == 2) & (after == 1), 2,  # agriculture to urban (urbanization)
+        Con(
+            (before == 1) & (after == 3), 3,  # urban to forest (reforestation)
+            0  # no change or other
+        )
+    )
+)
+change_type.save("change_classified.tif")
+
+# Vector change detection (compare two polygon layers)
+arcpy.analysis.SymDiff(
+    "buildings_2020", "buildings_2024", "building_changes"
+)
+arcpy.management.CalculateField(
+    "building_changes", "CHANGE_TYPE",
+    "classify(!FID_buildings_2020!, !FID_buildings_2024!)",
+    expression_type="PYTHON3",
+    code_block="""
+def classify(fid_old, fid_new):
+    if fid_old == -1: return 'NEW'
+    elif fid_new == -1: return 'DEMOLISHED'
+    else: return 'MODIFIED'
+""",
+)
+
+arcpy.CheckInExtension("Spatial")
 ```
 
 ---

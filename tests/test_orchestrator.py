@@ -406,6 +406,54 @@ class TestArcGISPack:
             content = (template_dir / name).read_text()
             assert len(content) > 50, f"Template {name} seems too short"
 
+    def test_arcgis_discover_skill_exists(self):
+        skill = (self.ARCGIS_DIR / "skills" / "arcgis-discover" / "SKILL.md").read_text()
+        assert "name: arcgis-discover" in skill
+        assert "user-invocable: true" in skill
+
+    def test_manifest_lists_discover_skill(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        assert "skills/arcgis-discover" in manifest["skills"]
+
+    def test_manifest_has_new_capabilities(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        for cap in ["data-discovery", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis"]:
+            assert cap in manifest["capabilities"], f"Missing capability: {cap}"
+
+    def test_context_has_hydrology(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Hydrology" in context
+        assert "FlowDirection" in context
+        assert "FlowAccumulation" in context
+        assert "Watershed" in context
+
+    def test_context_has_3d_analyst(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "3D Analyst" in context
+        assert "LAS" in context
+        assert "ClassifyLasGround" in context
+        assert "LasDatasetToRaster" in context
+        assert "Viewshed" in context
+
+    def test_context_has_time_series(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Time-Series" in context
+        assert "SpaceTimeCube" in context
+        assert "EmergingHotSpotAnalysis" in context
+
+    def test_context_has_dataset_discovery(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Dataset Discovery" in context
+        assert "suggest_tools" in context
+        assert "inventory_gdb" in context
+
+    def test_context_has_expanded_web_gis(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Feature layer CRUD" in context
+        assert "Portal administration" in context
+        assert "Web maps and web apps" in context
+        assert "Spatially Enabled DataFrames" in context
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

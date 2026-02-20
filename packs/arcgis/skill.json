@@ -1,14 +1,15 @@
 {
   "name": "arcgis",
-  "version": "0.2.0",
-  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, and document ingestion",
+  "version": "0.3.0",
+  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, data discovery, and web GIS",
   "author": "OpenClaw Community",
   "dependencies": [],
-  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management"],
+  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management", "data-discovery", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis", "portal-admin"],
   "skills": [
     "skills/arcgis",
     "skills/arcgis-project",
-    "skills/arcgis-ingest"
+    "skills/arcgis-ingest",
+    "skills/arcgis-discover"
   ],
   "context_files": [
     "CONTEXT.md"
