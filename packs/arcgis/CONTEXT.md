@@ -293,6 +293,274 @@ for region_name, shape in regions_cursor:
 aprx.save()
 ```
 
+### Map Production — Layouts, Elements, Symbology, Labels, Export
+
+Full layout automation for professional map production. This covers creating
+layouts from scratch, adding map frames, map elements, symbology, labels,
+and exporting to JPEG/PDF at print quality.
+
+#### Create a layout from scratch
+```python
+aprx = arcpy.mp.ArcGISProject(r"C:\Projects\MyProject.aprx")
+
+# Create a new A4 layout (portrait: 21cm x 29.7cm)
+layout = aprx.createLayout(29.7, 21, "CENTIMETER", "A4 Landscape")
+# Portrait: aprx.createLayout(21, 29.7, "CENTIMETER", "A4 Portrait")
+
+# Add a map frame — this is the main map view
+map_obj = aprx.listMaps("Map")[0]
+map_frame = layout.createMapFrame(
+    arcpy.Extent(1, 3, 27, 19),  # position on layout (left, bottom, right, top) in cm
+    map_obj,
+    "Main Map Frame",
+)
+# Set the map extent to the study area
+study_extent = arcpy.Describe("study_area").extent
+map_frame.camera.setExtent(study_extent)
+
+# Add an inset / locator map (smaller frame, different map or same map zoomed out)
+inset_map = aprx.listMaps("Locator")[0]  # or same map with different extent
+inset_frame = layout.createMapFrame(
+    arcpy.Extent(22, 14, 28, 19),  # top-right corner of layout
+    inset_map,
+    "Inset Map",
+)
+# Set inset extent to wider area
+inset_frame.camera.setExtent(
+    arcpy.Extent(300000, 100000, 600000, 400000)  # wider UK extent in BNG
+)
+```
+
+#### Multiple map frames on one layout (side-by-side detail maps)
+```python
+# Two detail maps side by side (e.g., "before" and "after", or two study areas)
+layout = aprx.createLayout(29.7, 21, "CENTIMETER", "Dual Map Layout")
+
+# Left map frame
+left_frame = layout.createMapFrame(
+    arcpy.Extent(1, 3, 14, 19),
+    aprx.listMaps("Detail A")[0],
+    "Left Detail",
+)
+# Right map frame
+right_frame = layout.createMapFrame(
+    arcpy.Extent(15, 3, 28, 19),
+    aprx.listMaps("Detail B")[0],
+    "Right Detail",
+)
+```
+
+#### Add map elements (title, scale bar, north arrow, legend, text)
+```python
+# Title
+title = layout.createMapSurroundElement(
+    arcpy.Point(14.85, 20.5),  # center-top of layout
+    "TEXT",
+    "Main Title",
+)
+# Access CIM for full text control
+cim = title.getDefinition("V3")
+cim.textString = "Site Suitability Analysis: Study Area"
+cim.textSymbol.symbol.height = 16
+cim.textSymbol.symbol.font.family = "Arial"
+cim.textSymbol.symbol.font.style = "Bold"
+title.setDefinition(cim)
+
+# Scale bar
+scale_bar = layout.createMapSurroundElement(
+    arcpy.Point(5, 1.5),
+    "SCALE_BAR",
+    "Scale Bar",
+    map_frame,  # linked to this map frame
+)
+
+# North arrow
+north_arrow = layout.createMapSurroundElement(
+    arcpy.Point(2, 17),
+    "NORTH_ARROW",
+    "North Arrow",
+    map_frame,
+)
+
+# Legend
+legend = layout.createMapSurroundElement(
+    arcpy.Point(23, 8),
+    "LEGEND",
+    "Legend",
+    map_frame,
+)
+
+# Copyright / data source text
+copyright_text = layout.createGraphicElement(
+    arcpy.Point(14.85, 0.8),
+    "TEXT",
+    "Copyright Text",
+)
+cim = copyright_text.getDefinition("V3")
+cim.textString = (
+    "Contains OS data © Crown copyright and database right 2024. "
+    "Flood data © Environment Agency. DTM © Edina Digimap."
+)
+cim.textSymbol.symbol.height = 6
+copyright_text.setDefinition(cim)
+
+# Author / creator text
+author_text = layout.createGraphicElement(
+    arcpy.Point(26, 0.8), "TEXT", "Author",
+)
+cim = author_text.getDefinition("V3")
+cim.textString = "Created by: [Your Name]"
+cim.textSymbol.symbol.height = 7
+author_text.setDefinition(cim)
+```
+
+#### Update existing layout text elements
+```python
+layout = aprx.listLayouts("A4 Landscape")[0]
+for elm in layout.listElements("TEXT_ELEMENT"):
+    print(f"  {elm.name}: '{elm.text}'")
+    if elm.name == "Title":
+        elm.text = "Updated Map Title"
+    if elm.name == "Date":
+        import datetime
+        elm.text = datetime.date.today().strftime("%d %B %Y")
+```
+
+#### Symbology — Unique Values
+```python
+map_obj = aprx.listMaps("Map")[0]
+lyr = map_obj.listLayers("land_use")[0]
+
+sym = lyr.symbology
+sym.updateRenderer("UniqueValueRenderer")
+sym.renderer.fields = ["LU_CODE"]
+
+# Add values manually
+sym.renderer.addValues({
+    sym.renderer.fields[0]: [
+        ["Urban", {"color": {"RGB": [255, 0, 0, 100]}, "label": "Urban"}],
+        ["Forest", {"color": {"RGB": [0, 128, 0, 100]}, "label": "Forest"}],
+        ["Agriculture", {"color": {"RGB": [255, 255, 0, 100]}, "label": "Agriculture"}],
+        ["Water", {"color": {"RGB": [0, 0, 255, 100]}, "label": "Water"}],
+    ]
+})
+lyr.symbology = sym
+
+# Alternative: use a layer file (.lyrx) for complex symbology
+lyr.updateConnectionProperties(lyr.connectionProperties, lyr.connectionProperties)
+arcpy.management.ApplySymbologyFromLayer(
+    in_layer=lyr,
+    in_symbology_layer=r"C:\Templates\land_use_symbology.lyrx",
+    symbology_fields=[["VALUE_FIELD", "LU_CODE", "LU_CODE"]],
+)
+```
+
+#### Symbology — Graduated Colors (classified values)
+```python
+lyr = map_obj.listLayers("elevation")[0]
+sym = lyr.symbology
+sym.updateRenderer("GraduatedColorsRenderer")
+sym.renderer.classificationField = "ELEVATION"
+sym.renderer.breakCount = 5
+sym.renderer.classificationMethod = "NaturalBreaks"
+sym.renderer.colorRamp = aprx.listColorRamps("Elevation #1")[0]
+lyr.symbology = sym
+```
+
+#### Symbology — Stretched (continuous raster: elevation, slope)
+```python
+# For raster layers (DEM, slope, etc.)
+raster_lyr = map_obj.listLayers("dem_clipped")[0]
+sym = raster_lyr.symbology
+sym.updateColorizer("RasterStretchColorizer")
+sym.colorizer.stretchType = "MinimumMaximum"
+sym.colorizer.colorRamp = aprx.listColorRamps("Elevation #1")[0]
+raster_lyr.symbology = sym
+```
+
+#### Symbology — Binary raster (suitable / unsuitable)
+```python
+# Two-colour symbology for binary suitability rasters (values 0 and 1)
+binary_lyr = map_obj.listLayers("suitable_areas")[0]
+sym = binary_lyr.symbology
+sym.updateColorizer("RasterUniqueValueColorizer")
+# Access via CIM for precise color control
+cim = binary_lyr.getDefinition("V3")
+colorizer = cim.colorizer
+# Set colors: 0 = red (unsuitable), 1 = green (suitable)
+for group in colorizer.groups:
+    for cls in group.classes:
+        if cls.values[0] == "0":
+            cls.symbol.symbol.color = {"RGB": [255, 0, 0, 100]}
+            cls.label = "Unsuitable"
+        elif cls.values[0] == "1":
+            cls.symbol.symbol.color = {"RGB": [0, 200, 0, 100]}
+            cls.label = "Suitable"
+binary_lyr.setDefinition(cim)
+```
+
+#### Labels — enable and configure
+```python
+lyr = map_obj.listLayers("towns")[0]
+lyr.showLabels = True
+
+# Configure label class
+label_class = lyr.listLabelClasses()[0]
+label_class.expression = "$feature.NAME"  # Arcade expression
+label_class.visible = True
+
+# Font styling via CIM
+cim = lyr.getDefinition("V3")
+for lc in cim.labelClasses:
+    ts = lc.textSymbol.symbol
+    ts.height = 8
+    ts.font.family = "Arial"
+    ts.font.style = "Bold"
+    ts.color = {"RGB": [0, 0, 0, 100]}
+    # Halo (text outline for readability)
+    ts.haloSize = 1
+    ts.haloSymbol = {"type": "CIMPolygonSymbol", "symbolLayers": [
+        {"type": "CIMSolidFill", "color": {"RGB": [255, 255, 255, 100]}}
+    ]}
+lyr.setDefinition(cim)
+```
+
+#### Export to JPEG at 300 dpi
+```python
+layout = aprx.listLayouts("A4 Landscape")[0]
+
+# JPEG export at 300 dpi (print quality)
+layout.exportToJPEG(
+    r"C:\Output\Map1_SuitabilityAnalysis.jpg",
+    resolution=300,
+    jpeg_quality=95,              # 1-100, higher = better quality
+    clip_to_elements=False,       # export full page
+)
+
+# Also export to PDF (vector quality, recommended for print)
+layout.exportToPDF(
+    r"C:\Output\Map1_SuitabilityAnalysis.pdf",
+    resolution=300,
+    image_quality="BEST",
+    layers_attributes="LAYERS_AND_ATTRIBUTES",
+)
+
+# Export to PNG (lossless, good for reports)
+layout.exportToPNG(
+    r"C:\Output\Map1_SuitabilityAnalysis.png",
+    resolution=300,
+)
+
+# Batch export all layouts in the project
+for layout in aprx.listLayouts():
+    safe_name = layout.name.replace(" ", "_")
+    layout.exportToJPEG(
+        rf"C:\Output\{safe_name}.jpg",
+        resolution=300, jpeg_quality=95,
+    )
+    print(f"Exported: {safe_name}")
+```
+
 ### Creating and managing data
 ```python
 # Create a new geodatabase
@@ -351,6 +619,39 @@ arcpy.conversion.FeaturesToJSON(
     in_features="parcels",
     out_json_file=r"C:\Output\parcels.geojson",
     geoJSON="GEOJSON",
+)
+
+# Polygon to Raster — CRITICAL for suitability analysis
+# Converts vector polygons to raster grid cells
+arcpy.conversion.PolygonToRaster(
+    in_features="land_use",
+    value_field="LU_CODE",           # attribute to burn into raster cells
+    out_rasterdataset="land_use_raster.tif",
+    cell_assignment="CELL_CENTER",   # or MAXIMUM_AREA, MAXIMUM_COMBINED_AREA
+    priority_field="NONE",
+    cellsize=5,                      # cell size in map units
+)
+# ⚠ CRITICAL: Set the environment extent BEFORE running PolygonToRaster
+# If extent isn't set, the output raster may not align with other rasters
+# and Raster Calculator will fail with misaligned grid errors.
+with arcpy.EnvManager(
+    extent="study_area",              # or "MINOF" / explicit coordinates
+    cellSize=5,                       # must match other rasters
+    snapRaster="reference_raster",    # ensures grid alignment
+):
+    arcpy.conversion.PolygonToRaster(
+        in_features="flood_zones",
+        value_field="FLOOD_RISK",
+        out_rasterdataset="flood_raster.tif",
+        cellsize=5,
+    )
+
+# Feature to Raster — alternative (simpler but less control)
+arcpy.conversion.FeatureToRaster(
+    in_features="land_use",
+    field="LU_CODE",
+    out_raster="land_use_raster.tif",
+    cell_size=5,
 )
 
 # Raster to polygon
@@ -2320,6 +2621,699 @@ def classify(fid_old, fid_new):
 )
 
 arcpy.CheckInExtension("Spatial")
+```
+
+---
+
+## UK Geospatial Data Sources & Patterns
+
+Common UK data sources, coordinate systems, and loading patterns for
+environmental, planning, and infrastructure analysis.
+
+### British National Grid (EPSG:27700)
+
+The standard CRS for all UK mapping work. All OS, EA, and Natural England
+data uses BNG. Always set this as your project CRS for UK work.
+
+```python
+BNG = arcpy.SpatialReference(27700)  # OSGB 1936 / British National Grid
+arcpy.env.outputCoordinateSystem = BNG
+
+# If data comes in WGS84 (e.g., from GPS), reproject to BNG
+arcpy.management.Project("gps_points", "gps_points_bng", BNG)
+```
+
+### UK data source reference
+
+| Data Type | Source | Format | Notes |
+|-----------|--------|--------|-------|
+| OS Basemaps (1:25k, 1:50k) | Edina Digimap | Raster (TIFF/ECW) | BNG, may need merge if multi-tile |
+| OS VectorMap Local | Edina Digimap | Vector (SHP/GML) | Roads, rail, rivers, buildings, woodland |
+| OS VectorMap District/Strategi | Edina Digimap | Vector | Coarser scale, wider coverage |
+| DTM (elevation) | Edina Digimap (DTM5) | Raster (ASC/TIFF) | 5m cell size, BNG, multi-tile |
+| Aerial imagery | Edina Digimap | Raster (TIFF/ECW) | BNG, often multi-tile |
+| Flood Warning Areas | data.gov.uk / EA | Vector (SHP/GeoJSON) | EA Flood Map for Planning |
+| Flood Alert Areas | data.gov.uk / EA | Vector (SHP/GeoJSON) | Wider flood risk zones |
+| Flood Zone 2 & 3 | data.gov.uk / EA | Vector (SHP) | Statutory planning zones |
+| Agricultural Land Classification (ALC) | Natural England / MAGIC | Vector (SHP) | Grades 1-5, field = "ALC_GRADE" |
+| Priority Habitats Inventory | Natural England / MAGIC | Vector (SHP) | Field = "Main_Habit" |
+| SSSI | Natural England / MAGIC | Vector (SHP) | Sites of Special Scientific Interest |
+| NNR | Natural England / MAGIC | Vector (SHP) | National Nature Reserves |
+| SAC | Natural England / MAGIC | Vector (SHP) | Special Areas of Conservation |
+| SPA | Natural England / MAGIC | Vector (SHP) | Special Protection Areas |
+| Ancient Woodland | Natural England / MAGIC | Vector (SHP) | Irreplaceable habitat |
+| Green Belt | Local authority / data.gov.uk | Vector (SHP) | Varies by council |
+
+### Loading multi-tile Digimap data
+```python
+import arcpy, os
+
+# Digimap downloads often come as multiple tiles
+# Merge them into a single layer before analysis
+
+# Raster tiles (DTM, basemap)
+tile_folder = r"C:\Data\Digimap\DTM5"
+arcpy.env.workspace = tile_folder
+tiles = arcpy.ListRasters("*.asc")  # or *.tif
+print(f"Found {len(tiles)} DTM tiles")
+
+# Mosaic all tiles into one raster
+arcpy.management.MosaicToNewRaster(
+    input_rasters=tiles,
+    output_location=r"C:\Projects\analysis.gdb",
+    raster_dataset_name_with_extension="dtm_merged",
+    coordinate_system_for_the_raster=arcpy.SpatialReference(27700),
+    pixel_type="32_BIT_FLOAT",
+    number_of_bands=1,
+    mosaic_method="MEAN",             # MEAN for elevation overlap areas
+)
+
+# Vector tiles (OS VectorMap Local comes as multiple tiles)
+vector_folder = r"C:\Data\Digimap\VML"
+arcpy.env.workspace = vector_folder
+
+# Merge all road tiles
+road_tiles = arcpy.ListFeatureClasses("*Road*")
+if road_tiles:
+    arcpy.management.Merge(road_tiles, r"C:\Projects\analysis.gdb\roads_all")
+
+# Merge all building tiles
+building_tiles = arcpy.ListFeatureClasses("*Building*")
+if building_tiles:
+    arcpy.management.Merge(building_tiles, r"C:\Projects\analysis.gdb\buildings_all")
+```
+
+### Loading EA flood data
+```python
+# EA Flood Map for Planning — download from data.gov.uk
+# Typically comes as shapefile with fields like PROB_4BAND, TYPE, etc.
+
+# Load and inspect
+arcpy.env.workspace = r"C:\Data\EA_Flood"
+for fc in arcpy.ListFeatureClasses("*flood*"):
+    desc = arcpy.Describe(fc)
+    count = int(arcpy.management.GetCount(fc)[0])
+    fields = [f.name for f in arcpy.ListFields(fc) if f.type not in ("OID", "Geometry")]
+    print(f"{fc}: {desc.shapeType} ({count}), fields: {fields}")
+
+# Common EA flood zone field values:
+# Flood Zone 2 — "Medium Probability" (0.1-1% annual chance from rivers)
+# Flood Zone 3 — "High Probability" (>1% annual chance)
+```
+
+### Loading Natural England / MAGIC data
+```python
+# MAGIC (magic.defra.gov.uk) data — statutory environmental designations
+# Download as shapefiles, all in BNG (EPSG:27700)
+
+# Agricultural Land Classification
+alc = r"C:\Data\MAGIC\ALC.shp"
+print("ALC Grades:", sorted({row[0] for row in
+    arcpy.da.SearchCursor(alc, ["ALC_GRADE"]) if row[0]}))
+# Typical values: "Grade 1", "Grade 2", "Grade 3a", "Grade 3b", "Grade 4", "Grade 5",
+#                 "Non Agricultural", "Urban"
+
+# Priority Habitats
+habitats = r"C:\Data\MAGIC\Priority_Habitats.shp"
+print("Habitat types:", sorted({row[0] for row in
+    arcpy.da.SearchCursor(habitats, ["Main_Habit"]) if row[0]}))
+
+# Designated sites — load and merge all into one constraints layer
+designations = ["SSSI.shp", "NNR.shp", "SAC.shp", "SPA.shp", "Ancient_Woodland.shp"]
+for shp in designations:
+    path = os.path.join(r"C:\Data\MAGIC", shp)
+    if arcpy.Exists(path):
+        count = int(arcpy.management.GetCount(path)[0])
+        print(f"  {shp}: {count} features")
+```
+
+---
+
+## Multi-Criteria Site Suitability Analysis (UK) — Complete Workflow
+
+End-to-end workflow for binary suitability analysis using UK data.
+Follows the 12-step process: setup → create study area → add data →
+merge → clip → buffer → slope → polygon-to-raster → reclassify →
+raster calculator → identify patches → map production.
+
+### Step 1: Setup project, CRS, geodatabase
+```python
+import arcpy
+import os
+from arcpy.sa import *
+
+arcpy.CheckOutExtension("Spatial")
+arcpy.env.overwriteOutput = True
+
+# British National Grid for all UK work
+BNG = arcpy.SpatialReference(27700)
+arcpy.env.outputCoordinateSystem = BNG
+
+# Create project geodatabase
+PROJECT_DIR = r"C:\Projects\SiteSuitability"
+GDB = os.path.join(PROJECT_DIR, "analysis.gdb")
+
+if not os.path.exists(PROJECT_DIR):
+    os.makedirs(PROJECT_DIR)
+if not arcpy.Exists(GDB):
+    arcpy.management.CreateFileGDB(PROJECT_DIR, "analysis.gdb")
+
+arcpy.env.workspace = GDB
+
+# Cell size for all raster operations (5m matches DTM5)
+CELL_SIZE = 5
+arcpy.env.cellSize = CELL_SIZE
+
+print(f"Project: {PROJECT_DIR}")
+print(f"GDB: {GDB}")
+print(f"CRS: {BNG.name}")
+print(f"Cell size: {CELL_SIZE}m")
+```
+
+### Step 2: Create study area polygon
+```python
+# Option A: Create from coordinates (BNG easting/northing)
+study_coords = arcpy.Array([
+    arcpy.Point(400000, 300000),
+    arcpy.Point(400000, 310000),
+    arcpy.Point(410000, 310000),
+    arcpy.Point(410000, 300000),
+    arcpy.Point(400000, 300000),  # close the polygon
+])
+study_polygon = arcpy.Polygon(study_coords, BNG)
+arcpy.management.CreateFeatureclass(GDB, "study_area", "POLYGON", spatial_reference=BNG)
+with arcpy.da.InsertCursor("study_area", ["SHAPE@"]) as cursor:
+    cursor.insertRow([study_polygon])
+
+# Option B: If you have an existing boundary shapefile
+# arcpy.management.CopyFeatures(r"C:\Data\my_boundary.shp", "study_area")
+
+# Set the study area as the processing extent for ALL subsequent operations
+arcpy.env.extent = "study_area"
+arcpy.env.mask = "study_area"
+
+print(f"Study area created: {int(arcpy.management.GetCount('study_area')[0])} feature(s)")
+desc = arcpy.Describe("study_area")
+ext = desc.extent
+print(f"Extent: {ext.XMin:.0f}, {ext.YMin:.0f} to {ext.XMax:.0f}, {ext.YMax:.0f}")
+```
+
+### Step 3: Add all required datasets
+```python
+# Load all datasets into the geodatabase
+datasets = {
+    # Vector data
+    "roads": r"C:\Data\Digimap\VML\Roads.shp",
+    "rail": r"C:\Data\Digimap\VML\Rail.shp",
+    "rivers": r"C:\Data\Digimap\VML\Rivers.shp",
+    "urban_areas": r"C:\Data\Digimap\VML\Urban.shp",
+    "woodland": r"C:\Data\Digimap\VML\Woodland.shp",
+    "flood_zone_2": r"C:\Data\EA\Flood_Zone_2.shp",
+    "flood_zone_3": r"C:\Data\EA\Flood_Zone_3.shp",
+    "flood_warning": r"C:\Data\EA\Flood_Warning_Areas.shp",
+    "alc": r"C:\Data\MAGIC\ALC.shp",
+    "priority_habitats": r"C:\Data\MAGIC\Priority_Habitats.shp",
+    "sssi": r"C:\Data\MAGIC\SSSI.shp",
+    "nnr": r"C:\Data\MAGIC\NNR.shp",
+    "sac": r"C:\Data\MAGIC\SAC.shp",
+    "spa": r"C:\Data\MAGIC\SPA.shp",
+}
+
+for name, path in datasets.items():
+    if arcpy.Exists(path):
+        arcpy.management.CopyFeatures(path, os.path.join(GDB, name))
+        count = int(arcpy.management.GetCount(name)[0])
+        print(f"  Loaded {name}: {count} features")
+    else:
+        print(f"  WARNING: {name} not found at {path}")
+
+# Raster data
+raster_datasets = {
+    "dtm": r"C:\Data\Digimap\DTM5",  # folder of tiles
+    "basemap_25k": r"C:\Data\Digimap\Raster\25k",
+    "aerial": r"C:\Data\Digimap\Aerial",
+}
+# DTM tiles — mosaic into one
+arcpy.env.workspace = raster_datasets["dtm"]
+dtm_tiles = arcpy.ListRasters("*.asc") or arcpy.ListRasters("*.tif")
+if dtm_tiles:
+    arcpy.management.MosaicToNewRaster(
+        dtm_tiles, GDB, "dtm_raw",
+        coordinate_system_for_the_raster=BNG,
+        pixel_type="32_BIT_FLOAT", number_of_bands=1,
+    )
+    print(f"  DTM mosaic: {len(dtm_tiles)} tiles merged")
+arcpy.env.workspace = GDB
+```
+
+### Step 4: Merge multi-tile datasets (same type)
+```python
+# If vector data came as multiple tiles, merge them
+# Example: OS VectorMap Local delivers roads as separate tiles per grid square
+arcpy.env.workspace = r"C:\Data\Digimap\VML"
+road_tiles = arcpy.ListFeatureClasses("*Road*")
+if len(road_tiles) > 1:
+    arcpy.management.Merge(road_tiles, os.path.join(GDB, "roads"))
+    print(f"Merged {len(road_tiles)} road tiles")
+
+# Merge all designated sites into one constraints layer
+arcpy.env.workspace = GDB
+designated = [ds for ds in ["sssi", "nnr", "sac", "spa"] if arcpy.Exists(ds)]
+if designated:
+    arcpy.management.Merge(designated, "designated_sites")
+    print(f"Merged {len(designated)} designation layers into 'designated_sites'")
+```
+
+### Step 5: Clip all layers to study area
+```python
+arcpy.env.workspace = GDB
+
+# Clip all vector layers
+vector_layers = [
+    "roads", "rail", "rivers", "urban_areas", "woodland",
+    "flood_zone_2", "flood_zone_3", "flood_warning",
+    "alc", "priority_habitats", "designated_sites",
+]
+for layer in vector_layers:
+    if arcpy.Exists(layer):
+        out_name = f"{layer}_clip"
+        arcpy.analysis.Clip(layer, "study_area", out_name)
+        count = int(arcpy.management.GetCount(out_name)[0])
+        print(f"  Clipped {layer}: {count} features")
+
+# Clip raster (DTM) to study area
+arcpy.management.Clip(
+    in_raster="dtm_raw",
+    out_raster="dtm_clip",
+    in_template_dataset="study_area",
+    clipping_geometry="ClippingGeometry",
+)
+print("  Clipped DTM to study area")
+```
+
+### Step 6: Buffer relevant layers (with different distances)
+```python
+# ⚠ CRITICAL: Different buffer distances for different road classes
+# Need to SELECT by attribute FIRST, then buffer separately
+
+# Split roads by class — motorways get 50m, other roads get 25m
+arcpy.management.MakeFeatureLayer("roads_clip", "motorways_lyr",
+    "CLASSIFICA = 'Motorway' OR CLASSIFICA = 'A Road'")
+arcpy.management.MakeFeatureLayer("roads_clip", "other_roads_lyr",
+    "CLASSIFICA <> 'Motorway' AND CLASSIFICA <> 'A Road'")
+
+arcpy.analysis.Buffer("motorways_lyr", "motorways_buffer",
+    "50 Meters", dissolve_option="ALL")
+arcpy.analysis.Buffer("other_roads_lyr", "other_roads_buffer",
+    "25 Meters", dissolve_option="ALL")
+
+# Merge all road buffers
+arcpy.management.Merge(
+    ["motorways_buffer", "other_roads_buffer"], "roads_buffer_all"
+)
+
+# Other buffers — all with dissolve ALL
+buffer_config = {
+    "rail_clip": ("rail_buffer", "25 Meters"),
+    "rivers_clip": ("rivers_buffer", "50 Meters"),
+    "woodland_clip": ("woodland_buffer", "50 Meters"),
+}
+for input_layer, (output, distance) in buffer_config.items():
+    if arcpy.Exists(input_layer):
+        arcpy.analysis.Buffer(input_layer, output, distance, dissolve_option="ALL")
+        print(f"  Buffered {input_layer} -> {output} ({distance})")
+
+# Clean up temporary layers
+for lyr in ["motorways_lyr", "other_roads_lyr"]:
+    arcpy.management.Delete(lyr)
+```
+
+### Step 7: Generate slope from DTM
+```python
+# Slope in degrees (for suitability: steep slopes = unsuitable)
+slope = Slope("dtm_clip", output_measurement="DEGREE")
+slope.save("slope_degrees")
+print(f"Slope range: {slope.minimum:.1f} to {slope.maximum:.1f} degrees")
+```
+
+### Step 8: Convert all vector layers to raster (cell size 5m)
+```python
+# ⚠ CRITICAL GOTCHA: Set extent AND snap raster for EVERY PolygonToRaster call
+# If extent is not set to the study area, rasters won't align and
+# Raster Calculator will fail with "ERROR 000864: Extent does not match"
+
+# Use the DTM as snap raster to ensure perfect grid alignment
+arcpy.env.snapRaster = "dtm_clip"
+arcpy.env.extent = "study_area"
+arcpy.env.cellSize = CELL_SIZE  # 5m
+
+# Layers to rasterize — each needs a value field
+# For presence/absence layers (buffer outputs), add a constant field first
+presence_layers = [
+    "roads_buffer_all", "rail_buffer", "rivers_buffer", "woodland_buffer",
+    "flood_zone_2_clip", "flood_zone_3_clip", "designated_sites_clip",
+    "priority_habitats_clip", "urban_areas_clip",
+]
+
+for layer in presence_layers:
+    if not arcpy.Exists(layer):
+        print(f"  SKIP (not found): {layer}")
+        continue
+
+    # Add a constant value field = 1 (presence)
+    if not any(f.name == "PRESENCE" for f in arcpy.ListFields(layer)):
+        arcpy.management.AddField(layer, "PRESENCE", "SHORT")
+    arcpy.management.CalculateField(layer, "PRESENCE", "1", "PYTHON3")
+
+    out_raster = f"{layer}_raster"
+    with arcpy.EnvManager(extent="study_area", cellSize=CELL_SIZE, snapRaster="dtm_clip"):
+        arcpy.conversion.PolygonToRaster(
+            in_features=layer,
+            value_field="PRESENCE",
+            out_rasterdataset=out_raster,
+            cell_assignment="CELL_CENTER",
+            cellsize=CELL_SIZE,
+        )
+    print(f"  Rasterized {layer} -> {out_raster}")
+
+# ALC needs its grade field, not a constant
+if arcpy.Exists("alc_clip"):
+    with arcpy.EnvManager(extent="study_area", cellSize=CELL_SIZE, snapRaster="dtm_clip"):
+        arcpy.conversion.PolygonToRaster(
+            "alc_clip", "ALC_GRADE", "alc_raster",
+            cell_assignment="CELL_CENTER", cellsize=CELL_SIZE,
+        )
+    print("  Rasterized ALC by grade")
+```
+
+### Step 9: Reclassify each raster to binary (1 = suitable, 0 = unsuitable)
+```python
+# ⚠ CRITICAL GOTCHA: NODATA handling
+# Where a constraint dataset has NO features (e.g., no flood zone in an area),
+# PolygonToRaster produces ALL NODATA. This must be reclassified to 1 (suitable)
+# because absence of a constraint = suitable.
+
+# Helper: reclassify presence raster to exclusion raster
+# presence=1 → 0 (unsuitable), NODATA → 1 (suitable, no constraint present)
+def reclassify_exclusion(in_raster, out_raster, label):
+    """Where feature IS present = unsuitable (0), elsewhere = suitable (1)."""
+    if not arcpy.Exists(in_raster):
+        print(f"  SKIP {label}: {in_raster} not found")
+        return None
+    r = Raster(in_raster)
+    # Con(condition, true_value, false_value)
+    # IsNull checks for NODATA cells — these are SUITABLE (no constraint)
+    result = Con(IsNull(r), 1, 0)
+    result.save(out_raster)
+    print(f"  Reclassified {label}: presence=0, absence=1")
+    return out_raster
+
+# Exclusion criteria — where features exist = UNSUITABLE
+exclusion_rasters = {}
+exclusion_rasters["roads"] = reclassify_exclusion(
+    "roads_buffer_all_raster", "reclass_roads", "Road buffers")
+exclusion_rasters["rail"] = reclassify_exclusion(
+    "rail_buffer_raster", "reclass_rail", "Rail buffers")
+exclusion_rasters["rivers"] = reclassify_exclusion(
+    "rivers_buffer_raster", "reclass_rivers", "River buffers")
+exclusion_rasters["flood_z3"] = reclassify_exclusion(
+    "flood_zone_3_clip_raster", "reclass_flood3", "Flood Zone 3")
+exclusion_rasters["designated"] = reclassify_exclusion(
+    "designated_sites_clip_raster", "reclass_designated", "Designated sites")
+exclusion_rasters["urban"] = reclassify_exclusion(
+    "urban_areas_clip_raster", "reclass_urban", "Urban areas")
+exclusion_rasters["habitats"] = reclassify_exclusion(
+    "priority_habitats_clip_raster", "reclass_habitats", "Priority habitats")
+
+# Slope reclassification — suitable if slope < 15 degrees
+slope_reclass = Con(Raster("slope_degrees") <= 15, 1, 0)
+slope_reclass.save("reclass_slope")
+exclusion_rasters["slope"] = "reclass_slope"
+print("  Reclassified slope: <=15deg=1, >15deg=0")
+
+# ALC reclassification — protect best agricultural land (Grades 1, 2, 3a)
+# Grade 1/2/3a = unsuitable (protected), Grade 3b/4/5/Non-Ag = suitable
+if arcpy.Exists("alc_raster"):
+    alc_r = Raster("alc_raster")
+    alc_reclass = Reclassify(alc_r, "VALUE", RemapValue([
+        ["Grade 1", 0], ["Grade 2", 0], ["Grade 3a", 0],   # protected
+        ["Grade 3b", 1], ["Grade 4", 1], ["Grade 5", 1],    # suitable
+        ["Non Agricultural", 1], ["Urban", 1],
+    ]), missing_values="DATA")
+    # Handle NODATA — if no ALC data, assume suitable
+    alc_final = Con(IsNull(alc_reclass), 1, alc_reclass)
+    alc_final.save("reclass_alc")
+    exclusion_rasters["alc"] = "reclass_alc"
+    print("  Reclassified ALC: Grade 1/2/3a=0, others=1")
+
+# Remove None entries (layers that were skipped)
+exclusion_rasters = {k: v for k, v in exclusion_rasters.items() if v is not None}
+print(f"\n{len(exclusion_rasters)} reclassified layers ready for combination")
+```
+
+### Step 10: Raster Calculator — multiply all reclassified layers
+```python
+# Multiply all binary layers: 1 * 1 * 1 = 1 (suitable everywhere)
+# Any 0 makes the cell 0 (unsuitable)
+raster_list = list(exclusion_rasters.values())
+
+# Start with the first raster, multiply each subsequent one
+combined = Raster(raster_list[0])
+for raster_path in raster_list[1:]:
+    combined = combined * Raster(raster_path)
+
+combined.save("suitability_result")
+print("Suitability combination complete")
+
+# Verify: count suitable vs unsuitable cells
+suitable_count = 0
+unsuitable_count = 0
+with arcpy.da.SearchCursor("suitability_result", ["VALUE", "COUNT"]) as cursor:
+    for value, count in cursor:
+        if value == 1:
+            suitable_count = count
+        else:
+            unsuitable_count = count
+total = suitable_count + unsuitable_count
+if total > 0:
+    pct = (suitable_count / total) * 100
+    print(f"Suitable: {suitable_count:,} cells ({pct:.1f}%)")
+    print(f"Unsuitable: {unsuitable_count:,} cells ({100-pct:.1f}%)")
+    area_ha = suitable_count * CELL_SIZE * CELL_SIZE / 10000
+    print(f"Suitable area: {area_ha:.1f} hectares")
+```
+
+### Step 11: Identify suitable patches of sufficient area
+```python
+# Convert binary suitability raster to polygons
+arcpy.conversion.RasterToPolygon(
+    "suitability_result", "suitability_polygons", "SIMPLIFY", "VALUE"
+)
+
+# Keep only suitable polygons (gridcode = 1)
+arcpy.management.MakeFeatureLayer(
+    "suitability_polygons", "suitable_lyr", "gridcode = 1"
+)
+arcpy.management.CopyFeatures("suitable_lyr", "suitable_patches")
+
+# Calculate area for each patch
+arcpy.management.CalculateGeometryAttributes(
+    "suitable_patches",
+    [["AREA_HA", "AREA"], ["PERIMETER_M", "PERIMETER_LENGTH"]],
+    area_unit="HECTARES",
+    length_unit="METERS",
+)
+
+# Filter by minimum area (e.g., patches > 1 hectare)
+MIN_AREA_HA = 1.0
+arcpy.management.MakeFeatureLayer(
+    "suitable_patches", "large_patches_lyr", f"AREA_HA >= {MIN_AREA_HA}"
+)
+arcpy.management.CopyFeatures("large_patches_lyr", "suitable_patches_final")
+
+count = int(arcpy.management.GetCount("suitable_patches_final")[0])
+print(f"Suitable patches >= {MIN_AREA_HA} ha: {count}")
+
+# Summary statistics
+with arcpy.da.SearchCursor("suitable_patches_final", ["AREA_HA"]) as cursor:
+    areas = sorted([row[0] for row in cursor], reverse=True)
+print(f"Largest: {areas[0]:.2f} ha")
+print(f"Smallest: {areas[-1]:.2f} ha")
+print(f"Total suitable area: {sum(areas):.2f} ha")
+
+# Clean up temporary layers
+for lyr in ["suitable_lyr", "large_patches_lyr"]:
+    arcpy.management.Delete(lyr)
+```
+
+### Step 12: Design and export 3 maps at 300dpi JPEG
+```python
+aprx = arcpy.mp.ArcGISProject("CURRENT")  # or path to .aprx
+
+# === MAP 1: Overview with study area + basemap ===
+layout1 = aprx.createLayout(29.7, 21, "CENTIMETER", "Map 1 - Overview")
+map1 = aprx.listMaps("Map")[0]
+
+# Add basemap and study area layers
+mf1 = layout1.createMapFrame(
+    arcpy.Extent(1, 3, 27, 19), map1, "Overview Frame"
+)
+mf1.camera.setExtent(arcpy.Describe("study_area").extent)
+
+# Add map elements
+layout1.createMapSurroundElement(arcpy.Point(14.85, 20.5), "TEXT", "Title1")
+layout1.createMapSurroundElement(arcpy.Point(5, 1.5), "SCALE_BAR", "SB1", mf1)
+layout1.createMapSurroundElement(arcpy.Point(2, 17), "NORTH_ARROW", "NA1", mf1)
+layout1.createMapSurroundElement(arcpy.Point(23, 10), "LEGEND", "Leg1", mf1)
+
+layout1.exportToJPEG(
+    os.path.join(PROJECT_DIR, "Map1_Overview.jpg"),
+    resolution=300, jpeg_quality=95,
+)
+
+# === MAP 2: Constraint layers + reclassification ===
+layout2 = aprx.createLayout(29.7, 21, "CENTIMETER", "Map 2 - Constraints")
+# ... similar setup with constraint layers visible ...
+layout2.exportToJPEG(
+    os.path.join(PROJECT_DIR, "Map2_Constraints.jpg"),
+    resolution=300, jpeg_quality=95,
+)
+
+# === MAP 3: Final suitability result (two detail maps side-by-side) ===
+layout3 = aprx.createLayout(29.7, 21, "CENTIMETER", "Map 3 - Suitability")
+
+# Left: full suitability raster with binary symbology
+left_frame = layout3.createMapFrame(
+    arcpy.Extent(1, 3, 14, 19), map1, "Suitability Full"
+)
+
+# Right: zoomed detail of best patches
+right_frame = layout3.createMapFrame(
+    arcpy.Extent(15, 3, 28, 19), map1, "Suitability Detail"
+)
+# Zoom to the largest suitable patch
+with arcpy.da.SearchCursor(
+    "suitable_patches_final", ["SHAPE@"], sql_clause=(None, "ORDER BY AREA_HA DESC")
+) as cursor:
+    largest = next(cursor)[0]
+    right_frame.camera.setExtent(largest.extent)
+    right_frame.camera.scale *= 1.2  # add 20% padding
+
+layout3.exportToJPEG(
+    os.path.join(PROJECT_DIR, "Map3_Suitability.jpg"),
+    resolution=300, jpeg_quality=95,
+)
+
+print("All 3 maps exported at 300 dpi")
+arcpy.CheckInExtension("Spatial")
+```
+
+---
+
+## Suitability Analysis — Critical Gotchas
+
+These mistakes cause the most failures in multi-criteria suitability analysis.
+Build these checks into EVERY suitability workflow.
+
+### 1. Extent must be set on EVERY PolygonToRaster conversion
+```python
+# ❌ WRONG — rasters will have different extents, Raster Calculator fails
+arcpy.conversion.PolygonToRaster("flood_zones", "RISK", "flood_raster", cellsize=5)
+arcpy.conversion.PolygonToRaster("woodland", "PRESENCE", "wood_raster", cellsize=5)
+# ERROR: "The extent of the rasters do not match"
+
+# ✅ CORRECT — always set extent, cellSize, and snapRaster
+with arcpy.EnvManager(extent="study_area", cellSize=5, snapRaster="dtm_clip"):
+    arcpy.conversion.PolygonToRaster("flood_zones", "RISK", "flood_raster", cellsize=5)
+    arcpy.conversion.PolygonToRaster("woodland", "PRESENCE", "wood_raster", cellsize=5)
+```
+
+### 2. NODATA handling in Reclassify — the silent killer
+```python
+# ❌ WRONG — areas with no flood zone become NODATA, which propagates
+# through multiplication and makes the ENTIRE area unsuitable
+flood_reclass = Reclassify(flood_raster, "VALUE", RemapValue([[1, 0]]))
+# Cells where there are NO flood zones → NODATA → kills the result
+
+# ✅ CORRECT — explicitly set NODATA to 1 (suitable = no constraint present)
+flood_reclass = Con(IsNull(flood_raster), 1, 0)  # NODATA→1, presence→0
+# OR use Con(IsNull(Reclassify(...)), 1, Reclassify(...))
+```
+
+### 3. Cell size consistency — all rasters must match
+```python
+# ❌ WRONG — mixing cell sizes causes silent resampling or errors
+arcpy.conversion.PolygonToRaster("roads", "PRESENCE", "roads_r", cellsize=5)
+arcpy.conversion.PolygonToRaster("flood", "PRESENCE", "flood_r", cellsize=10)
+# Raster Calculator will resample one → inaccurate results
+
+# ✅ CORRECT — set cell size globally and use snap raster
+CELL_SIZE = 5
+arcpy.env.cellSize = CELL_SIZE
+arcpy.env.snapRaster = "dtm_clip"  # ensures grid cells align perfectly
+```
+
+### 4. Selective buffering — different distances for different feature types
+```python
+# ❌ WRONG — buffering all roads the same distance
+arcpy.analysis.Buffer("roads", "roads_buffer", "25 Meters")
+# Motorways should be 50m, minor roads 25m
+
+# ✅ CORRECT — select by attribute first, buffer separately, then merge
+arcpy.management.MakeFeatureLayer("roads", "motorways",
+    "ROAD_CLASS IN ('Motorway', 'A Road')")
+arcpy.management.MakeFeatureLayer("roads", "minor_roads",
+    "ROAD_CLASS NOT IN ('Motorway', 'A Road')")
+arcpy.analysis.Buffer("motorways", "motorway_buffer", "50 Meters", dissolve_option="ALL")
+arcpy.analysis.Buffer("minor_roads", "minor_buffer", "25 Meters", dissolve_option="ALL")
+arcpy.management.Merge(["motorway_buffer", "minor_buffer"], "roads_buffer_combined")
+```
+
+### 5. Buffer dissolve option — always dissolve
+```python
+# ❌ WRONG — individual buffer rings overlap, counts as separate features
+arcpy.analysis.Buffer("rivers", "river_buffer", "50 Meters")
+# Result: overlapping buffer polygons that double-count in rasterization
+
+# ✅ CORRECT — dissolve all into single feature
+arcpy.analysis.Buffer("rivers", "river_buffer", "50 Meters", dissolve_option="ALL")
+# Result: single merged polygon, no overlaps
+```
+
+### 6. Verify raster alignment before combining
+```python
+# Always check that all rasters share the same properties before Raster Calculator
+def check_raster_alignment(raster_names):
+    """Verify all rasters have matching extent, cell size, and CRS."""
+    issues = []
+    ref = arcpy.Describe(raster_names[0])
+    ref_ext = ref.extent
+    ref_cell = round(ref.meanCellWidth, 4)
+    ref_crs = ref.spatialReference.factoryCode
+
+    for name in raster_names[1:]:
+        desc = arcpy.Describe(name)
+        cell = round(desc.meanCellWidth, 4)
+        crs = desc.spatialReference.factoryCode
+        ext = desc.extent
+
+        if cell != ref_cell:
+            issues.append(f"{name}: cell size {cell} != {ref_cell}")
+        if crs != ref_crs:
+            issues.append(f"{name}: CRS {crs} != {ref_crs}")
+        if abs(ext.XMin - ref_ext.XMin) > ref_cell:
+            issues.append(f"{name}: extent mismatch (XMin off by {ext.XMin - ref_ext.XMin:.1f})")
+
+    if issues:
+        print("⚠ ALIGNMENT ISSUES:")
+        for issue in issues:
+            print(f"  - {issue}")
+        return False
+    else:
+        print("✓ All rasters aligned")
+        return True
+
+check_raster_alignment(list(exclusion_rasters.values()))
 ```
 
 ---

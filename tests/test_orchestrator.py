@@ -454,6 +454,71 @@ class TestArcGISPack:
         assert "Web maps and web apps" in context
         assert "Spatially Enabled DataFrames" in context
 
+    def test_context_has_polygon_to_raster(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "PolygonToRaster" in context
+        assert "FeatureToRaster" in context
+        assert "CELL_CENTER" in context
+
+    def test_context_has_map_production(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Map Production" in context
+        assert "createLayout" in context
+        assert "createMapFrame" in context
+        assert "SCALE_BAR" in context
+        assert "NORTH_ARROW" in context
+        assert "LEGEND" in context
+        assert "exportToJPEG" in context
+
+    def test_context_has_symbology(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "UniqueValueRenderer" in context
+        assert "GraduatedColorsRenderer" in context
+        assert "RasterStretchColorizer" in context
+        assert "binary raster" in context.lower()
+
+    def test_context_has_labels(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "showLabels" in context
+        assert "listLabelClasses" in context
+
+    def test_context_has_uk_data_sources(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "British National Grid" in context
+        assert "27700" in context
+        assert "Edina Digimap" in context
+        assert "Environment Agency" in context or "data.gov.uk" in context
+        assert "Natural England" in context
+        assert "MAGIC" in context
+        assert "Agricultural Land Classification" in context
+
+    def test_context_has_suitability_workflow(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Multi-Criteria Site Suitability" in context
+        assert "Step 1:" in context
+        assert "Step 12:" in context
+        assert "study_area" in context
+        assert "reclassify_exclusion" in context
+        assert "suitability_result" in context
+
+    def test_context_has_suitability_gotchas(self):
+        context = (self.ARCGIS_DIR / "CONTEXT.md").read_text()
+        assert "Suitability Analysis" in context and "Gotchas" in context
+        assert "NODATA" in context
+        assert "snapRaster" in context
+        assert "check_raster_alignment" in context
+        assert "dissolve_option" in context
+
+    def test_manifest_has_suitability_capabilities(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        for cap in ["site-suitability", "uk-planning", "layout-automation",
+                     "map-production", "polygon-to-raster", "multi-criteria-analysis"]:
+            assert cap in manifest["capabilities"], f"Missing capability: {cap}"
+
+    def test_manifest_version_updated(self):
+        manifest = json.loads((self.ARCGIS_DIR / "skill.json").read_text())
+        assert manifest["version"] == "0.4.0"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

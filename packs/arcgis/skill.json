@@ -1,10 +1,10 @@
 {
   "name": "arcgis",
-  "version": "0.3.0",
-  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, data discovery, and web GIS",
+  "version": "0.4.0",
+  "description": "ArcGIS Pro + arcpy domain knowledge for geospatial analysis, project management, data discovery, web GIS, UK planning, site suitability, and professional map production",
   "author": "OpenClaw Community",
   "dependencies": [],
-  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management", "data-discovery", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis", "portal-admin"],
+  "capabilities": ["geospatial", "mapping", "arcpy", "spatial-analysis", "network-analyst", "spatial-statistics", "geocoding", "raster", "project-management", "data-discovery", "hydrology", "3d-analyst", "lidar", "time-series", "web-gis", "portal-admin", "site-suitability", "uk-planning", "layout-automation", "map-production", "polygon-to-raster", "reclassify", "multi-criteria-analysis"],
   "skills": [
     "skills/arcgis",
     "skills/arcgis-project",
