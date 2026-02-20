@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.5.0 — Patchwork Audit Trail & Policy Enforcement
+
+Re-introduces patchwork as a Claude Code hooks-based audit and security layer.
+Every tool call is logged and checked against configurable security policies.
+
+### Added
+- **`plugins/patchwork.py`** — hook handler script called by Claude Code on
+  every lifecycle event (SessionStart, PreToolUse, PostToolUse, SessionEnd)
+- **`policies/default.yaml`** — shipped security policies with deny/warn rules:
+  - Deny: `rm -rf /`, `mkfs`, raw disk writes, `DROP TABLE/DATABASE`,
+    `TRUNCATE TABLE`, force push, `chmod 777`, piping remote scripts to shell,
+    writing `.env` / credential / private key files, modifying
+    `.claude/settings.json`
+  - Warn: `sudo`, package publishing, `git reset --hard`, `git clean -f`,
+    dependency manifest changes, CI/CD config changes, reading `.env` or
+    private key files
+- **`orchestrator.py bootstrap`** — one command wires patchwork into any project:
+  creates `.patchwork/` directory, copies default policies, merges hooks into
+  `.claude/settings.json`, updates `.gitignore` and `CLAUDE.md`
+- **`orchestrator.py audit`** — pretty-prints the audit trail with session
+  filtering (`--session`) and tail control (`--tail`)
+- **30 new tests** across 6 test classes covering policies, audit logging,
+  hook handlers, input summarization, bootstrap, and default policy validation
+
+### Changed
+- `orchestrator.py` expanded with bootstrap and audit CLI subcommands
+- `.claude/CLAUDE.md` updated with patchwork documentation
+- `README.md` updated with full patchwork section (lifecycle hooks, policies,
+  audit trail usage, project structure)
+
 ## v0.4.0 — Strip to Core
 
 Removed the plan execution engine. Claude Code already handles building and
