@@ -937,6 +937,51 @@ for layout in aprx.listLayouts():
     print(f"Exported: {safe_name}")
 ```
 
+#### Consistent colour schemes across multiple maps
+```python
+# When producing multiple maps (e.g., 3 maps for a suitability report),
+# symbology must be consistent — same colours, same classification, same legend.
+
+# Strategy 1: Save symbology as .lyrx, apply to all maps
+# Set up symbology once on a layer, then save as a template:
+lyr = map_obj.listLayers("land_use")[0]
+# ... configure symbology on lyr (UniqueValueRenderer, colors, etc.) ...
+lyr.saveACopy(r"C:\Templates\land_use_symbology.lyrx")
+
+# Apply same symbology to the same layer in other maps:
+for map_name in ["Map 1 - Overview", "Map 2 - Constraints", "Map 3 - Result"]:
+    m = aprx.listMaps(map_name)[0]
+    target_lyr = m.listLayers("land_use")[0]
+    arcpy.management.ApplySymbologyFromLayer(
+        in_layer=target_lyr,
+        in_symbology_layer=r"C:\Templates\land_use_symbology.lyrx",
+        symbology_fields=[["VALUE_FIELD", "LU_CODE", "LU_CODE"]],
+    )
+
+# Strategy 2: Configure symbology programmatically with identical settings
+# Define colors once, apply to every map:
+SUITABILITY_COLORS = {
+    0: {"RGB": [255, 80, 80, 100]},   # red = unsuitable
+    1: {"RGB": [80, 200, 80, 100]},   # green = suitable
+}
+
+for map_name in ["Map 1 - Overview", "Map 2 - Constraints", "Map 3 - Result"]:
+    m = aprx.listMaps(map_name)[0]
+    for lyr in m.listLayers():
+        if lyr.name == "suitability_result":
+            cim = lyr.getDefinition("V3")
+            for group in cim.colorizer.groups:
+                for cls in group.classes:
+                    val = int(cls.values[0])
+                    if val in SUITABILITY_COLORS:
+                        cls.symbol.symbol.color = SUITABILITY_COLORS[val]
+            lyr.setDefinition(cim)
+
+# Strategy 3: Share a single layer across map frames
+# If multiple map frames on one layout show the SAME map, they automatically
+# share symbology. Only use separate maps when you need different visible layers.
+```
+
 ### Creating and managing data
 ```python
 # Create a new geodatabase
